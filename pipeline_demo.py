@@ -25,6 +25,7 @@ try:
     from pipeline.data import create_synthetic_data
     from pipeline.train_awcgan import create_training_config
     from pipeline.realistic_terrain_enhancer import RealisticTerrainEnhancer
+    from pipeline.advanced_terrain_renderer import AdvancedTerrainRenderer
 except ImportError as e:
     print(f"Error importing pipeline modules: {e}")
     print("Make sure all pipeline files are in the 'pipeline' directory")
@@ -97,7 +98,9 @@ class TerrainPipelineDemo:
             self.mesh_generator = TerrainMeshGenerator(method="structured_grid")
             self.visualizer = TerrainVisualizer()
             self.exporter = MeshExporter()
+            self.advanced_renderer = AdvancedTerrainRenderer()
             logger.info("✓ 3D mesh components initialized")
+            logger.info("✓ Advanced photorealistic renderer initialized")
             
             logger.info("Pipeline initialization complete!")
             
@@ -196,7 +199,7 @@ class TerrainPipelineDemo:
             enhanced = enhanced.convert('RGB').resize(output_size)
             return enhanced, heightmap
     
-    def create_3d_mesh(self, heightmap: np.ndarray, scale_factor: float = 0.3):
+    def create_3d_mesh(self, heightmap: np.ndarray, scale_factor: float = 20.0):
         """
         Generate 3D mesh from heightmap.
         
@@ -267,15 +270,31 @@ class TerrainPipelineDemo:
             logger.warning(f"Failed to export mesh: {e}")
             paths["mesh_vtk"] = None
         
-        # Save 3D visualization
+        # Save standard 3D visualization
         viz_path = session_dir / "visualization_3d.png"
         self.visualizer.visualize_terrain(
             mesh=mesh,
             title=f"Terrain: {prompt}",
             save_path=str(viz_path),
-            interactive=False
+            interactive=False,
+            enhanced_texture=enhanced_image
         )
         paths["visualization"] = str(viz_path)
+        
+        # Save PHOTOREALISTIC 3D visualization
+        photorealistic_path = session_dir / "visualization_3d_PHOTOREALISTIC.png"
+        try:
+            self.advanced_renderer.create_photorealistic_visualization(
+                heightmap=heightmap,
+                enhanced_texture=enhanced_image,
+                terrain_prompt=prompt,
+                output_path=str(photorealistic_path)
+            )
+            paths["photorealistic_viz"] = str(photorealistic_path)
+            logger.info(f"✓ Photorealistic visualization saved: {photorealistic_path}")
+        except Exception as e:
+            logger.warning(f"Failed to create photorealistic visualization: {e}")
+            paths["photorealistic_viz"] = None
         
         # Save metadata
         metadata = {
@@ -284,6 +303,7 @@ class TerrainPipelineDemo:
             "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "heightmap_shape": list(heightmap.shape),
             "heightmap_range": [float(heightmap.min()), float(heightmap.max())],
+            "has_photorealistic_viz": paths.get("photorealistic_viz") is not None,
             "files": paths
         }
         
@@ -596,6 +616,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, help="Random seed")
     parser.add_argument("--no-remaster", action="store_true", 
                        help="Disable Stable Diffusion remastering")
+    parser.add_argument("--interactive-3d", action="store_true",
+                       help="Launch interactive 3D viewer after generation")
     
     args = parser.parse_args()
     
@@ -612,6 +634,33 @@ if __name__ == "__main__":
             if result["success"]:
                 print(f"✓ Generated terrain for: '{args.prompt}'")
                 print(f"Results: {result['file_paths']['metadata']}")
+                
+                # Launch interactive 3D viewer if requested
+                if args.interactive_3d:
+                    try:
+                        print("\n🎮 Launching interactive 3D viewer...")
+                        session_dir = Path(result['file_paths']['metadata']).parent
+                        
+                        # Load terrain data for interactive viewer
+                        heightmap_path = session_dir / "heightmap.png"
+                        enhanced_path = session_dir / "enhanced_terrain.png"
+                        
+                        if heightmap_path.exists() and enhanced_path.exists():
+                            heightmap_img = Image.open(heightmap_path).convert('L')
+                            heightmap = np.array(heightmap_img).astype(np.float32) / 255.0
+                            enhanced_texture = Image.open(enhanced_path)
+                            
+                            pipeline.advanced_renderer.create_interactive_photorealistic_visualization(
+                                heightmap=heightmap,
+                                enhanced_texture=enhanced_texture,
+                                terrain_prompt=args.prompt
+                            )
+                            print("✓ Interactive session completed!")
+                        else:
+                            print("❌ Could not find terrain files for interactive viewer")
+                            
+                    except Exception as e:
+                        print(f"❌ Failed to launch interactive viewer: {e}")
             else:
                 print(f"✗ Failed: {result.get('error', 'Unknown error')}")
                 

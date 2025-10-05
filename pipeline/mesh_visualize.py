@@ -339,6 +339,68 @@ class TerrainVisualizer:
         
         return mesh
     
+    def apply_realistic_texture(
+        self,
+        mesh: pv.DataSet,
+        enhanced_image: Union[np.ndarray, Image.Image, str]
+    ) -> pv.DataSet:
+        """
+        Apply realistic terrain texture from enhanced image to mesh.
+        
+        Args:
+            mesh: Input mesh
+            enhanced_image: Enhanced terrain image (RGB array, PIL Image, or file path)
+            
+        Returns:
+            pv.DataSet: Mesh with realistic texture applied
+        """
+        # Load image if path provided
+        if isinstance(enhanced_image, str):
+            enhanced_image = Image.open(enhanced_image)
+        
+        # Convert PIL Image to numpy array
+        if isinstance(enhanced_image, Image.Image):
+            enhanced_image = np.array(enhanced_image)
+        
+        # Ensure RGB format
+        if len(enhanced_image.shape) == 2:
+            enhanced_image = np.stack([enhanced_image] * 3, axis=-1)
+        elif enhanced_image.shape[2] == 4:  # RGBA
+            enhanced_image = enhanced_image[:, :, :3]
+        
+        # Get mesh dimensions
+        bounds = mesh.bounds
+        x_range = (bounds[0], bounds[1])
+        y_range = (bounds[2], bounds[3])
+        
+        # Get mesh points
+        points = mesh.points
+        
+        # Map mesh coordinates to image coordinates
+        img_height, img_width = enhanced_image.shape[:2]
+        
+        # Normalize coordinates to [0, 1]
+        x_norm = (points[:, 0] - x_range[0]) / (x_range[1] - x_range[0])
+        y_norm = (points[:, 1] - y_range[0]) / (y_range[1] - y_range[0])
+        
+        # Convert to image indices
+        x_indices = np.clip((x_norm * (img_width - 1)).astype(int), 0, img_width - 1)
+        y_indices = np.clip(((1 - y_norm) * (img_height - 1)).astype(int), 0, img_height - 1)
+        
+        # Sample colors from enhanced image
+        colors = enhanced_image[y_indices, x_indices]
+        
+        # Normalize colors to [0, 1] for PyVista
+        colors_normalized = colors.astype(np.float32) / 255.0
+        
+        # Add colors to mesh with proper naming
+        mesh.point_data['RGB'] = colors_normalized
+        mesh.set_active_scalars('RGB')
+        
+        logger.info(f"Applied realistic texture to mesh: {colors_normalized.shape}")
+        
+        return mesh
+    
     def add_terrain_lighting(self, plotter: pv.Plotter):
         """Add realistic lighting for terrain visualization"""
         # Remove default lights first
@@ -387,7 +449,8 @@ class TerrainVisualizer:
         show_scalar_bar: bool = True,
         camera_position: Optional[list] = None,
         save_path: Optional[str] = None,
-        interactive: bool = True
+        interactive: bool = True,
+        enhanced_texture: Optional[Union[np.ndarray, Image.Image, str]] = None
     ) -> Optional[np.ndarray]:
         """
         Visualize terrain mesh interactively.
@@ -409,27 +472,63 @@ class TerrainVisualizer:
         # Create plotter
         plotter = self.create_plotter(off_screen=not interactive)
         
-        # Apply colormap and ensure elevation data is set
-        mesh = self.apply_terrain_colormap(mesh, colormap)
-        
-        # Ensure we have elevation data for coloring
-        if "elevation" not in mesh.array_names and mesh.n_points > 0:
-            # Create elevation data from Z coordinates
-            z_coords = mesh.points[:, 2]
-            mesh["elevation"] = z_coords
-            mesh.set_active_scalars("elevation")
-        
-        # Add mesh to scene with explicit scalar field
-        actor = plotter.add_mesh(
-            mesh,
-            scalars="elevation" if "elevation" in mesh.array_names else None,
-            cmap=colormap,
-            show_edges=show_edges,
-            show_scalar_bar=show_scalar_bar,
-            lighting=self.lighting,
-            smooth_shading=True,
-            opacity=1.0
-        )
+        # Apply realistic texture if provided, otherwise use elevation colormap
+        if enhanced_texture is not None:
+            try:
+                mesh = self.apply_realistic_texture(mesh, enhanced_texture)
+                # Add mesh with realistic texture colors
+                actor = plotter.add_mesh(
+                    mesh,
+                    scalars="RGB",  # Use the RGB texture colors
+                    rgb=True,  # Important: tell PyVista these are RGB values
+                    show_edges=show_edges,
+                    show_scalar_bar=False,  # No scalar bar for RGB colors
+                    lighting=self.lighting,
+                    smooth_shading=True,
+                    opacity=1.0
+                )
+            except Exception as e:
+                print(f"Warning: Failed to apply realistic texture: {e}")
+                print("Falling back to elevation-based coloring...")
+                # Fall back to elevation coloring
+                mesh = self.apply_terrain_colormap(mesh, colormap)
+                if "elevation" not in mesh.array_names and mesh.n_points > 0:
+                    z_coords = mesh.points[:, 2]
+                    mesh["elevation"] = z_coords
+                    mesh.set_active_scalars("elevation")
+                
+                actor = plotter.add_mesh(
+                    mesh,
+                    scalars="elevation" if "elevation" in mesh.array_names else None,
+                    cmap=colormap,
+                    show_edges=show_edges,
+                    show_scalar_bar=show_scalar_bar,
+                    lighting=self.lighting,
+                    smooth_shading=True,
+                    opacity=1.0
+                )
+        else:
+            # Apply colormap and ensure elevation data is set
+            mesh = self.apply_terrain_colormap(mesh, colormap)
+            
+            # Ensure we have elevation data for coloring
+            if "elevation" not in mesh.array_names and mesh.n_points > 0:
+                # Create elevation data from Z coordinates
+                z_coords = mesh.points[:, 2]
+                mesh["elevation"] = z_coords
+                mesh.set_active_scalars("elevation")
+            
+            # Add mesh to scene with explicit scalar field
+            actor = plotter.add_mesh(
+                mesh,
+                scalars="elevation" if "elevation" in mesh.array_names else None,
+                cmap=colormap,
+                show_edges=show_edges,
+                show_scalar_bar=show_scalar_bar,
+                lighting=self.lighting,
+                smooth_shading=True,
+                opacity=1.0
+            )
         
         # Add wireframe if requested
         if show_wireframe:
@@ -445,11 +544,23 @@ class TerrainVisualizer:
         if self.lighting:
             self.add_terrain_lighting(plotter)
         
-        # Set camera position
+        # Set camera position with better defaults for terrain
         if camera_position:
             plotter.camera_position = camera_position
         else:
-            plotter.camera_position = self.camera_position
+            # Better default camera position for elevated terrain
+            mesh_bounds = mesh.bounds
+            center_x = (mesh_bounds[0] + mesh_bounds[1]) / 2
+            center_y = (mesh_bounds[2] + mesh_bounds[3]) / 2
+            center_z = (mesh_bounds[4] + mesh_bounds[5]) / 2
+            
+            cam_distance = max(mesh_bounds[1] - mesh_bounds[0], mesh_bounds[3] - mesh_bounds[2]) * 1.5
+            camera_pos = [
+                (center_x + cam_distance, center_y + cam_distance, center_z + cam_distance * 0.5),
+                (center_x, center_y, center_z),
+                (0, 0, 1)
+            ]
+            plotter.camera_position = camera_pos
         
         # Set title
         plotter.add_title(title, font_size=16)
