@@ -18,10 +18,18 @@ try:
     from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
     from diffusers import DDIMScheduler, DPMSolverMultistepScheduler
     from diffusers.utils import load_image
-    import xformers
     HAS_DIFFUSERS = True
+    
+    # Try to import xformers for memory optimization (optional)
+    try:
+        import xformers
+        HAS_XFORMERS = True
+    except ImportError:
+        HAS_XFORMERS = False
+        
 except ImportError:
     HAS_DIFFUSERS = False
+    HAS_XFORMERS = False
     logging.warning("Diffusers not available. Install with: pip install diffusers")
 
 # Transformers imports
@@ -64,13 +72,21 @@ class MemoryEfficientSD:
         
         # Load Stable Diffusion pipeline
         logger.info(f"Loading Stable Diffusion: {model_id}")
-        self.pipe = StableDiffusionControlNetPipeline.from_pretrained(
-            model_id,
-            controlnet=self.controlnet,
-            torch_dtype=self.dtype,
-            use_safetensors=True,
-            variant="fp16" if use_fp16 else None
-        )
+        
+        # Simpler initialization to avoid compatibility issues
+        try:
+            self.pipe = StableDiffusionControlNetPipeline.from_pretrained(
+                model_id,
+                controlnet=self.controlnet,
+                safety_checker=None,
+                requires_safety_checker=False
+            )
+            # Convert to appropriate dtype after loading
+            if use_fp16:
+                self.pipe = self.pipe.to(torch.float16)
+        except Exception as e:
+            logger.error(f"Failed to load Stable Diffusion pipeline: {e}")
+            raise
         
         # Memory optimizations
         if enable_memory_efficient_attention:
@@ -82,8 +98,14 @@ class MemoryEfficientSD:
         
         # CPU offloading for low VRAM
         if enable_cpu_offload:
-            self.pipe.enable_model_cpu_offload()
-            logger.info("Enabled CPU offloading")
+            try:
+                self.pipe.enable_model_cpu_offload()
+                logger.info("Enabled CPU offloading")
+            except TypeError as e:
+                # Fallback for compatibility issues
+                logger.warning(f"CPU offloading failed: {e}, continuing without offloading")
+            except Exception as e:
+                logger.warning(f"CPU offloading error: {e}, continuing without offloading")
         else:
             self.pipe = self.pipe.to(device)
         

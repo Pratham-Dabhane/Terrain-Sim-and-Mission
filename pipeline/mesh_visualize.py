@@ -341,13 +341,33 @@ class TerrainVisualizer:
     
     def add_terrain_lighting(self, plotter: pv.Plotter):
         """Add realistic lighting for terrain visualization"""
+        # Remove default lights first
+        plotter.remove_all_lights()
+        
         # Sun light (primary)
         sun_light = pv.Light(
-            position=(1.0, 1.0, 2.0),
+            position=(2.0, 2.0, 3.0),
             focal_point=(0.5, 0.5, 0.0),
             color="white",
-            intensity=0.8
+            intensity=0.7
         )
+        plotter.add_light(sun_light)
+        
+        # Fill light (softer)
+        fill_light = pv.Light(
+            position=(-1.0, -1.0, 2.0),
+            focal_point=(0.5, 0.5, 0.0),
+            color="lightblue",
+            intensity=0.3
+        )
+        plotter.add_light(fill_light)
+        
+        # Ambient light
+        ambient_light = pv.Light(
+            light_type='headlight',
+            intensity=0.2
+        )
+        plotter.add_light(ambient_light)
         plotter.add_light(sun_light)
         
         # Ambient light
@@ -389,17 +409,26 @@ class TerrainVisualizer:
         # Create plotter
         plotter = self.create_plotter(off_screen=not interactive)
         
-        # Apply colormap
+        # Apply colormap and ensure elevation data is set
         mesh = self.apply_terrain_colormap(mesh, colormap)
         
-        # Add mesh to scene
+        # Ensure we have elevation data for coloring
+        if "elevation" not in mesh.array_names and mesh.n_points > 0:
+            # Create elevation data from Z coordinates
+            z_coords = mesh.points[:, 2]
+            mesh["elevation"] = z_coords
+            mesh.set_active_scalars("elevation")
+        
+        # Add mesh to scene with explicit scalar field
         actor = plotter.add_mesh(
             mesh,
+            scalars="elevation" if "elevation" in mesh.array_names else None,
             cmap=colormap,
             show_edges=show_edges,
             show_scalar_bar=show_scalar_bar,
             lighting=self.lighting,
-            smooth_shading=True
+            smooth_shading=True,
+            opacity=1.0
         )
         
         # Add wireframe if requested

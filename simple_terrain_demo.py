@@ -5,6 +5,13 @@ Tests the core pipeline components step by step.
 
 import os
 import sys
+import warnings
+
+# Suppress TensorFlow warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', message='.*deprecated.*')
+
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -62,8 +69,10 @@ def test_basic_generation():
         
         # Save heightmap
         heightmap_path = "Output/test_heightmap.png"
-        heightmap_img = Image.fromarray((heightmap * 255).astype(np.uint8), mode='L')
-        heightmap_img.save(heightmap_path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            heightmap_img = Image.fromarray((heightmap * 255).astype(np.uint8), mode='L')
+            heightmap_img.save(heightmap_path)
         print(f"   ✅ Heightmap saved: {heightmap_path}")
         
         # 3. Test Basic 3D Visualization (fallback method)
@@ -90,15 +99,39 @@ def test_basic_generation():
             
             # Create visualization
             try:
-                plotter = pv.Plotter(off_screen=True)
-                plotter.add_mesh(grid, cmap='terrain', show_scalar_bar=True)
-                plotter.camera_position = [(width/2, height/2, 100), (width/2, height/2, 0), (0, 0, 1)]
+                plotter = pv.Plotter(off_screen=True, window_size=(1024, 768))
+                
+                # Configure lighting and rendering
+                plotter.background_color = 'white'
+                plotter.enable_depth_peeling()
+                
+                # Add mesh with proper scalar mapping
+                actor = plotter.add_mesh(
+                    grid, 
+                    scalars='elevation',
+                    cmap='terrain',
+                    show_scalar_bar=True,
+                    lighting=True,
+                    smooth_shading=True,
+                    opacity=1.0
+                )
+                
+                # Set up proper camera position
+                plotter.camera_position = [
+                    (width*1.5, height*1.5, 50),  # Camera position
+                    (width/2, height/2, 5),       # Focal point
+                    (0, 0, 1)                     # Up vector
+                ]
+                
+                # Add lighting
+                plotter.add_light(pv.Light(position=(width, height, 100), intensity=0.8))
+                
                 viz_path = "Output/test_terrain_3d.png"
-                plotter.screenshot(viz_path)
+                plotter.screenshot(viz_path, return_img=False)
                 plotter.close()
                 print(f"   ✅ 3D visualization saved: {viz_path}")
-            except:
-                print("   ⚠️  3D visualization failed (likely headless environment)")
+            except Exception as e:
+                print(f"   ⚠️  3D visualization failed: {e}")
                 
         except ImportError:
             print("   ⚠️  PyVista not available, creating matplotlib 3D plot...")
@@ -193,7 +226,9 @@ def test_basic_generation():
             
             # Save individual heightmap
             individual_path = f"Output/terrain_{i+1}_heightmap.png"
-            Image.fromarray((heightmap * 255).astype(np.uint8), mode='L').save(individual_path)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                Image.fromarray((heightmap * 255).astype(np.uint8), mode='L').save(individual_path)
         
         plt.tight_layout()
         gallery_path = "Output/terrain_gallery.png"

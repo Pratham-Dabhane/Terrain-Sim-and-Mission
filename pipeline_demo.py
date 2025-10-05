@@ -21,10 +21,10 @@ sys.path.append('pipeline')
 try:
     from pipeline.clip_encoder import CLIPTextEncoderWithProcessor
     from pipeline.models_awcgan import CLIPConditionedGenerator
-    from pipeline.remaster_sd_controlnet import TerrainRemaster
     from pipeline.mesh_visualize import TerrainMeshGenerator, TerrainVisualizer, MeshExporter
     from pipeline.data import create_synthetic_data
     from pipeline.train_awcgan import create_training_config
+    from pipeline.realistic_terrain_enhancer import RealisticTerrainEnhancer
 except ImportError as e:
     print(f"Error importing pipeline modules: {e}")
     print("Make sure all pipeline files are in the 'pipeline' directory")
@@ -48,7 +48,7 @@ class TerrainPipelineDemo:
         # Initialize components
         self.clip_encoder = None
         self.generator = None
-        self.remaster = None
+        self.enhancer = None
         self.mesh_generator = None
         self.visualizer = None
         self.exporter = None
@@ -85,18 +85,13 @@ class TerrainPipelineDemo:
             
             self.generator.eval()
             
-            # Stable Diffusion remaster (optional)
+            # Realistic terrain enhancer
             try:
-                self.remaster = TerrainRemaster(
-                    controlnet_type="depth",
-                    device=self.device,
-                    use_fp16=True,
-                    enable_cpu_offload=True
-                )
-                logger.info("✓ Stable Diffusion remaster initialized")
+                self.enhancer = RealisticTerrainEnhancer()
+                logger.info("✓ Realistic terrain enhancer initialized")
             except Exception as e:
-                logger.warning(f"Stable Diffusion not available: {e}")
-                self.remaster = None
+                logger.warning(f"Terrain enhancer initialization failed: {e}")
+                self.enhancer = None
             
             # 3D mesh components
             self.mesh_generator = TerrainMeshGenerator(method="structured_grid")
@@ -154,7 +149,7 @@ class TerrainPipelineDemo:
         seed: int = None
     ) -> tuple:
         """
-        Enhance heightmap with Stable Diffusion + ControlNet.
+        Enhance heightmap with realistic terrain coloring and textures.
         
         Args:
             heightmap: Input heightmap
@@ -163,36 +158,41 @@ class TerrainPipelineDemo:
             seed: Random seed
             
         Returns:
-            tuple: (remastered_image, enhanced_heightmap)
+            tuple: (enhanced_image, enhanced_heightmap)
         """
-        if not self.remaster:
-            logger.warning("Stable Diffusion not available, skipping remastering")
-            # Create fallback enhanced image
-            enhanced = Image.fromarray((heightmap * 255).astype(np.uint8), mode='L')
+        if not self.enhancer:
+            logger.info("Terrain enhancer disabled, using basic grayscale")
+            # Create basic grayscale image
+            enhanced = Image.fromarray((heightmap * 255).astype(np.uint8))
             enhanced = enhanced.convert('RGB').resize(output_size)
             return enhanced, heightmap
         
-        logger.info(f"Remastering heightmap with Stable Diffusion...")
+        logger.info(f"Enhancing heightmap with realistic terrain colors...")
         
         try:
-            remastered_image, enhanced_heightmap = self.remaster.remaster_heightmap(
-                heightmap=heightmap,
+            # Convert heightmap to proper format for enhancer
+            heightmap_uint8 = (heightmap * 255).astype(np.uint8)
+            
+            # Apply realistic terrain enhancement
+            enhanced_rgb = self.enhancer.enhance_heightmap(
+                heightmap=heightmap_uint8,
                 prompt=prompt,
-                negative_prompt="blurry, low quality, distorted, unrealistic",
-                num_inference_steps=20,
-                guidance_scale=7.5,
-                controlnet_conditioning_scale=0.8,
-                output_size=output_size,
-                seed=seed,
-                preserve_geometry=True
+                apply_lighting=True,
+                texture_strength=0.08
             )
             
-            return remastered_image, enhanced_heightmap
+            # Convert to PIL Image and resize if needed
+            enhanced_image = Image.fromarray(enhanced_rgb, mode='RGB')
+            if enhanced_image.size != output_size:
+                enhanced_image = enhanced_image.resize(output_size, Image.Resampling.LANCZOS)
+            
+            logger.info(f"✓ Terrain enhancement complete: {enhanced_image.size}")
+            return enhanced_image, heightmap
             
         except Exception as e:
-            logger.error(f"Remastering failed: {e}")
+            logger.error(f"Terrain enhancement failed: {e}")
             # Fallback to basic enhancement
-            enhanced = Image.fromarray((heightmap * 255).astype(np.uint8), mode='L')
+            enhanced = Image.fromarray((heightmap * 255).astype(np.uint8))
             enhanced = enhanced.convert('RGB').resize(output_size)
             return enhanced, heightmap
     
@@ -222,7 +222,7 @@ class TerrainPipelineDemo:
         self, 
         prompt: str,
         heightmap: np.ndarray,
-        remastered_image: Image.Image,
+        enhanced_image: Image.Image,
         mesh,
         session_id: str
     ) -> Dict[str, str]:
@@ -232,7 +232,7 @@ class TerrainPipelineDemo:
         Args:
             prompt: Original text prompt
             heightmap: Generated heightmap
-            remastered_image: Enhanced image
+            enhanced_image: Enhanced terrain image
             mesh: 3D mesh
             session_id: Unique session identifier
             
@@ -249,22 +249,23 @@ class TerrainPipelineDemo:
         
         # Save heightmap
         heightmap_path = session_dir / "heightmap.png"
-        heightmap_img = Image.fromarray((heightmap * 255).astype(np.uint8), mode='L')
+        heightmap_img = Image.fromarray((heightmap * 255).astype(np.uint8))
         heightmap_img.save(heightmap_path)
         paths["heightmap"] = str(heightmap_path)
         
-        # Save remastered image
-        remastered_path = session_dir / "remastered.png"
-        remastered_image.save(remastered_path)
-        paths["remastered"] = str(remastered_path)
+        # Save enhanced terrain image
+        enhanced_path = session_dir / "enhanced_terrain.png"
+        enhanced_image.save(enhanced_path)
+        paths["enhanced"] = str(enhanced_path)
         
         # Save 3D mesh
-        mesh_ply_path = session_dir / "mesh.ply"
-        mesh_obj_path = session_dir / "mesh.obj"
-        self.exporter.export_mesh(mesh, str(mesh_ply_path))
-        self.exporter.export_mesh(mesh, str(mesh_obj_path))
-        paths["mesh_ply"] = str(mesh_ply_path)
-        paths["mesh_obj"] = str(mesh_obj_path)
+        mesh_vtk_path = session_dir / "mesh.vtk"
+        try:
+            self.exporter.export_mesh(mesh, str(mesh_vtk_path))
+            paths["mesh_vtk"] = str(mesh_vtk_path)
+        except Exception as e:
+            logger.warning(f"Failed to export mesh: {e}")
+            paths["mesh_vtk"] = None
         
         # Save 3D visualization
         viz_path = session_dir / "visualization_3d.png"
@@ -306,7 +307,7 @@ class TerrainPipelineDemo:
         Args:
             prompt: Text description of terrain
             seed: Random seed for reproducibility
-            enable_remastering: Whether to use Stable Diffusion enhancement
+            enable_remastering: Whether to use realistic terrain enhancement
             output_size: Size for final outputs
             
         Returns:
@@ -323,16 +324,16 @@ class TerrainPipelineDemo:
             heightmap = self.generate_heightmap(prompt, seed)
             logger.info(f"Heightmap generated: {heightmap.shape}, range [{heightmap.min():.3f}, {heightmap.max():.3f}]")
             
-            # Step 2: Remaster with Stable Diffusion (optional)
+            # Step 2: Enhance with realistic terrain coloring (optional)
             if enable_remastering:
-                remastered_image, enhanced_heightmap = self.remaster_heightmap(
+                enhanced_image, enhanced_heightmap = self.remaster_heightmap(
                     heightmap, prompt, output_size, seed
                 )
                 final_heightmap = enhanced_heightmap
             else:
                 # Use original heightmap
-                remastered_image = Image.fromarray((heightmap * 255).astype(np.uint8), mode='L')
-                remastered_image = remastered_image.convert('RGB').resize(output_size)
+                enhanced_image = Image.fromarray((heightmap * 255).astype(np.uint8))
+                enhanced_image = enhanced_image.convert('RGB').resize(output_size)
                 final_heightmap = heightmap
             
             # Step 3: Generate 3D mesh
@@ -341,7 +342,7 @@ class TerrainPipelineDemo:
             
             # Step 4: Save all results
             file_paths = self.save_results(
-                prompt, heightmap, remastered_image, mesh, session_id
+                prompt, heightmap, enhanced_image, mesh, session_id
             )
             
             # Calculate timing
@@ -352,7 +353,7 @@ class TerrainPipelineDemo:
                 "prompt": prompt,
                 "seed": seed,
                 "heightmap": heightmap,
-                "remastered_image": remastered_image,
+                "enhanced_image": enhanced_image,
                 "mesh": mesh,
                 "file_paths": file_paths,
                 "elapsed_time": elapsed_time,
@@ -516,12 +517,81 @@ def run_interactive_demo():
     print(f"\nGenerated {session_count} terrains. Thank you!")
 
 
+def run_batch_demo():
+    """Run batch generation with predefined prompts"""
+    
+    print("=== Batch Terrain Generation ===")
+    print("Generating multiple terrain examples...")
+    
+    pipeline = TerrainPipelineDemo()
+    
+    # Predefined batch prompts
+    batch_prompts = [
+        "rocky mountains with snow peaks",
+        "rolling hills with gentle slopes",
+        "volcanic terrain with craters",
+        "desert landscape with sand dunes",
+        "coastal cliffs with rocky outcrops",
+        "forest terrain with rivers and valleys",
+        "alpine landscape with glaciers",
+        "canyon landscape with deep ravines"
+    ]
+    
+    results = []
+    
+    for i, prompt in enumerate(batch_prompts, 1):
+        print(f"\nGenerating terrain {i}/{len(batch_prompts)}: '{prompt}'")
+        
+        try:
+            result = pipeline.run_complete_pipeline(
+                prompt=prompt,
+                seed=i * 42,  # Consistent seeds for reproducibility
+                enable_remastering=True
+            )
+            
+            if result["success"]:
+                print(f"✓ Success! Generated in {result['elapsed_time']:.1f}s")
+                results.append({
+                    'prompt': prompt,
+                    'success': True,
+                    'time': result['elapsed_time'],
+                    'files': result['file_paths']
+                })
+            else:
+                print(f"✗ Failed: {result.get('error', 'Unknown error')}")
+                results.append({
+                    'prompt': prompt,
+                    'success': False,
+                    'error': result.get('error', 'Unknown error')
+                })
+                
+        except Exception as e:
+            print(f"✗ Error: {e}")
+            results.append({
+                'prompt': prompt,
+                'success': False,
+                'error': str(e)
+            })
+    
+    # Summary
+    successful = sum(1 for r in results if r['success'])
+    total_time = sum(r.get('time', 0) for r in results if r['success'])
+    
+    print(f"\n=== Batch Generation Complete ===")
+    print(f"Successful: {successful}/{len(batch_prompts)}")
+    print(f"Total time: {total_time:.1f}s")
+    print(f"Average time: {total_time/successful:.1f}s per terrain" if successful > 0 else "")
+    print(f"Output folder: {pipeline.output_dir}")
+    
+    return results
+
+
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Terrain Generation Pipeline Demo")
-    parser.add_argument("--mode", choices=["demo", "interactive"], default="demo",
-                       help="Demo mode: run examples or interactive input")
+    parser.add_argument("--mode", choices=["demo", "interactive", "batch"], default="demo",
+                       help="Demo mode: demo (examples), interactive (user input), or batch (multiple examples)")
     parser.add_argument("--prompt", type=str, help="Single prompt to generate")
     parser.add_argument("--seed", type=int, help="Random seed")
     parser.add_argument("--no-remaster", action="store_true", 
@@ -547,6 +617,8 @@ if __name__ == "__main__":
                 
         elif args.mode == "interactive":
             run_interactive_demo()
+        elif args.mode == "batch":
+            run_batch_demo()
         else:
             run_demo_examples()
             
