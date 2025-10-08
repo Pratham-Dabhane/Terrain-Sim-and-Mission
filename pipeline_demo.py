@@ -26,6 +26,7 @@ try:
     from pipeline.train_awcgan import create_training_config
     from pipeline.realistic_terrain_enhancer import RealisticTerrainEnhancer
     from pipeline.advanced_terrain_renderer import AdvancedTerrainRenderer
+    from pipeline.config import PipelineConfig, get_default_config
 except ImportError as e:
     print(f"Error importing pipeline modules: {e}")
     print("Make sure all pipeline files are in the 'pipeline' directory")
@@ -39,10 +40,15 @@ class TerrainPipelineDemo:
     Complete demonstration of the terrain generation pipeline.
     """
     
-    def __init__(self, output_dir: str = "Output", device: str = None):
+    def __init__(self, output_dir: str = "Output", device: str = None, config: PipelineConfig = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         
+        # Store configuration (use default if none provided)
+        self.config = config or get_default_config()
+        logger.info(f"Pipeline initialized with config: {self.config._count_enabled_features()} features enabled")
+        
+        # Auto-detect device the old way (maintaining existing behavior)
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
         
