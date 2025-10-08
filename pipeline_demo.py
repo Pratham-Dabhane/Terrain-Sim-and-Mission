@@ -136,11 +136,65 @@ class TerrainPipelineDemo:
             logger.info("Using procedural terrain generation")
             try:
                 import pipeline.procedural_noise_utils as pn
+                from pipeline.prompt_parser import parse_prompt_to_params
+                
+                # Parse prompt to extract terrain parameters
+                parsed = parse_prompt_to_params(prompt)
+                
+                # Create default noise parameters
+                default_params = {
+                    'scale': 100.0,
+                    'octaves': 6,
+                    'persistence': 0.5,
+                    'lacunarity': 2.0,
+                    'mountain_weight': 0.8,
+                    'valley_weight': 0.2,
+                    'river_strength': 0.3,
+                    'river_frequency': 0.05,
+                    'seed': seed
+                }
+                
+                # Merge parsed parameters with defaults
+                procedural_params = default_params.copy()
+                
+                # Map parsed parameters to NoiseParams fields
+                if 'mountain_octaves' in parsed:
+                    procedural_params['octaves'] = parsed['mountain_octaves']
+                if 'scale' in parsed:
+                    procedural_params['scale'] = parsed['scale'] * 20.0  # Scale up for better terrain
+                if 'persistence' in parsed:
+                    procedural_params['persistence'] = parsed['persistence']
+                if 'lacunarity' in parsed:
+                    procedural_params['lacunarity'] = parsed['lacunarity']
+                if 'mountain_weight' in parsed:
+                    procedural_params['mountain_weight'] = parsed['mountain_weight']
+                if 'valley_weight' in parsed:
+                    procedural_params['valley_weight'] = parsed['valley_weight']
+                if 'river_strength' in parsed:
+                    procedural_params['river_strength'] = parsed['river_strength']
+                if 'river_freq' in parsed:
+                    procedural_params['river_frequency'] = parsed['river_freq']
+                
+                # Log the final parameters
+                logger.info(f"Procedural params: {procedural_params}")
+                
+                # Create NoiseParams object
+                noise_params = pn.NoiseParams(
+                    scale=procedural_params['scale'],
+                    octaves=procedural_params['octaves'],
+                    persistence=procedural_params['persistence'],
+                    lacunarity=procedural_params['lacunarity'],
+                    mountain_weight=procedural_params['mountain_weight'],
+                    valley_weight=procedural_params['valley_weight'],
+                    river_strength=procedural_params['river_strength'],
+                    river_frequency=procedural_params['river_frequency'],
+                    seed=seed
+                )
                 
                 # Generate procedural heightmap
                 heightmap = pn.generate_procedural_heightmap(
                     shape=self.config.base_heightmap_size,
-                    params=pn.NoiseParams(seed=seed)
+                    params=noise_params
                 )
                 
                 logger.info(f"✓ Procedural heightmap generated: shape={heightmap.shape}, range=[{heightmap.min():.3f}, {heightmap.max():.3f}]")
