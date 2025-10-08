@@ -116,7 +116,7 @@ class TerrainPipelineDemo:
     
     def generate_heightmap(self, prompt: str, seed: int = None) -> np.ndarray:
         """
-        Generate heightmap from text prompt using GAN.
+        Generate heightmap from text prompt using procedural or GAN methods.
         
         Args:
             prompt: Text description of terrain
@@ -131,6 +131,26 @@ class TerrainPipelineDemo:
             torch.manual_seed(seed)
             np.random.seed(seed)
         
+        # Check if procedural generation is enabled
+        if self.config.procedural_enabled:
+            logger.info("Using procedural terrain generation")
+            try:
+                import pipeline.procedural_noise_utils as pn
+                
+                # Generate procedural heightmap
+                heightmap = pn.generate_procedural_heightmap(
+                    shape=self.config.base_heightmap_size,
+                    params=pn.NoiseParams(seed=seed)
+                )
+                
+                logger.info(f"✓ Procedural heightmap generated: shape={heightmap.shape}, range=[{heightmap.min():.3f}, {heightmap.max():.3f}]")
+                return heightmap
+                
+            except Exception as e:
+                logger.warning(f"Procedural generation failed, falling back to GAN: {e}")
+                # Continue to GAN generation below
+        
+        # Original GAN-based generation path
         with torch.no_grad():
             # Encode text prompt
             clip_embedding = self.clip_encoder.encode_text_with_enhancement(
