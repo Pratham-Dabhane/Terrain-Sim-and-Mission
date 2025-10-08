@@ -116,7 +116,7 @@ class TerrainPipelineDemo:
     
     def generate_heightmap(self, prompt: str, seed: int = None) -> np.ndarray:
         """
-        Generate heightmap from text prompt using procedural or GAN methods.
+        Generate heightmap from text prompt using AI, procedural, or GAN methods.
         
         Args:
             prompt: Text description of terrain
@@ -130,6 +130,47 @@ class TerrainPipelineDemo:
         if seed is not None:
             torch.manual_seed(seed)
             np.random.seed(seed)
+        
+        # Check if AI heightmap generation is enabled
+        if self.config.ai_heightmap_enabled:
+            logger.info("Using AI diffusion model for heightmap generation")
+            try:
+                from pipeline.ai_heightmap_generator import create_ai_heightmap_generator
+                
+                # Create AI generator with memory checks
+                ai_generator = create_ai_heightmap_generator(device=self.device)
+                
+                if ai_generator is not None:
+                    # Check memory requirements
+                    memory_info = ai_generator.check_memory_requirements()
+                    
+                    if memory_info["recommended"]:
+                        # Generate heightmap using AI
+                        heightmap = ai_generator.generate_heightmap(
+                            prompt=prompt,
+                            size=self.config.base_heightmap_size,
+                            seed=seed
+                        )
+                        
+                        if heightmap is not None:
+                            logger.info(f"✓ AI heightmap generated: shape={heightmap.shape}, range=[{heightmap.min():.3f}, {heightmap.max():.3f}]")
+                            # Clean up to free memory
+                            ai_generator.cleanup()
+                            return heightmap
+                        else:
+                            logger.warning("AI heightmap generation returned None, falling back")
+                    else:
+                        logger.warning(f"AI heightmap generation not recommended: {memory_info.get('reason', 'Unknown')}")
+                        logger.info("Falling back to procedural/GAN generation")
+                    
+                    # Clean up resources
+                    ai_generator.cleanup()
+                else:
+                    logger.warning("AI heightmap generator not available, falling back")
+                    
+            except Exception as e:
+                logger.warning(f"AI heightmap generation failed, falling back: {e}")
+                # Continue to other generation methods
         
         # Check if procedural generation is enabled
         if self.config.procedural_enabled:
