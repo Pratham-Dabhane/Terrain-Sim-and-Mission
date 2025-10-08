@@ -1,33 +1,52 @@
-# 🌍 AI-Powered Terrain Generation Pipeline
+# 🌍 AI-Powered Terrain Generation & Mission Planning Pipeline
 
-A production-ready AI system that generates photorealistic 3D terrains from natural language descriptions using advanced machine learning technologies including CLIP, Wasserstein GANs, and interactive 3D visualization.
+A comprehensive AI system that generates photorealistic 3D terrains from natural language descriptions and provides intelligent mission planning capabilities. Built with advanced machine learning technologies including CLIP, Wasserstein GANs, procedural generation, and A* pathfinding.
 
 ## ✨ Key Features
 
-- **🎯 Text-to-Terrain AI**: Convert natural language into realistic 3D landscapes
-- **🧠 CLIP + aWCGAN Pipeline**: OpenAI CLIP text encoding with Wasserstein Conditional GAN generation
-- **🎨 Photorealistic Rendering**: Cinema-quality 3D visualization with advanced lighting
-- **🎮 Interactive 3D Viewer**: Real-time terrain exploration with rotate/zoom/pan controls
-- **🌲 Intelligent Biome Detection**: Automatic terrain coloring (forest, desert, mountain, arctic)
-- **🔧 Multiple Output Formats**: 2D images, 3D meshes (VTK/PLY/OBJ), interactive views
-- **🚀 Web API Support**: REST API for web applications and integrations
+### 🎯 Terrain Generation
+- **Text-to-Terrain AI**: Convert natural language into realistic 3D landscapes
+- **Multiple Generation Modes**: AI-powered (aWCGAN), Procedural (fBM noise), and AI diffusion
+- **Smart Prompt Parsing**: Intelligent keyword extraction for terrain types and features
+- **Slope-based Color Mapping**: Realistic terrain coloring based on elevation and slope
+
+### 🎨 Advanced Visualization  
+- **Photorealistic Rendering**: Cinema-quality 3D visualization with SSAO and advanced lighting
+- **Multi-light Setup**: Golden hour lighting with 4-point illumination system
+- **High-Resolution Output**: Ultra-HD (1920x1080) static terrain visualization
+- **Interactive 3D Viewer**: Real-time terrain exploration with rotate/zoom/pan controls
+
+### 🚁 Mission Planning
+- **A* Pathfinding**: Intelligent route planning with terrain-aware cost analysis
+- **Interactive Point Selection**: Click-to-select start and goal points on terrain
+- **Mission Visualization**: Path overlay with cost analysis and waypoint tracking
+- **Terrain Cost Analysis**: Elevation and slope-based navigation difficulty assessment
+
+### 🔧 Technical Features
+- **Multiple Output Formats**: 2D images, 3D meshes (VTK/PLY/OBJ), mission overlays
+- **Enhanced Metadata**: Comprehensive terrain statistics and generation analytics
+- **Configuration System**: Feature flags for enabling/disabling pipeline components
+- **Web API Support**: REST API for web applications and integrations
 - **⚡ GPU Accelerated**: CUDA support for fast generation on modern GPUs
 
 ## 🏗️ System Architecture
 
 ```
-Text Input → CLIP Encoder → aWCGAN Generator → Heightmap → 3D Mesh → Interactive Viewer
-     ↓              ↓              ↓            ↓           ↓            ↓
-"mountain lake" → [512D vector] → Neural Net → Elevation → Photorealistic → User Controls
+Text Input → Prompt Parser → Multi-Mode Generation → Enhanced Rendering → Mission Planning
+     ↓             ↓              ↓                    ↓                ↓
+"alpine valley" → Keywords → [AI/Procedural/Diffusion] → Photorealistic → A* Pathfinding
 ```
 
 **Complete Pipeline:**
-1. **CLIP Text Encoding**: Converts natural language to semantic embeddings
-2. **aWCGAN Generation**: Creates terrain heightmaps from text embeddings  
-3. **Biome Enhancement**: Applies realistic colors based on terrain type
-4. **3D Mesh Creation**: Generates interactive 3D models with 65K+ vertices
-5. **Photorealistic Rendering**: Cinema-quality visualization with 3-point lighting
-6. **Interactive Exploration**: Real-time 3D interaction like matplotlib figures
+1. **Intelligent Prompt Parsing**: Extracts terrain keywords and features from natural language
+2. **Multi-Mode Generation**: 
+   - **AI Mode**: CLIP + aWCGAN neural network generation
+   - **Procedural Mode**: Fractal Brownian Motion (fBM) noise generation  
+   - **Diffusion Mode**: Optional AI diffusion model for heightmap creation
+3. **Slope-based Color Mapping**: Realistic terrain coloring based on elevation and gradients
+4. **Advanced 3D Rendering**: Cinema-quality visualization with SSAO, multi-light setup
+5. **Mission Planning**: A* pathfinding with interactive point selection and cost analysis
+6. **Enhanced Metadata**: Comprehensive terrain statistics and generation analytics
 
 ## 🚀 Quick Start
 
@@ -46,47 +65,77 @@ cd "Terrain Sim and Mission"
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Optional: Install stable requirements for guaranteed compatibility
+pip install -r requirements_stable.txt
 ```
 
 ## 🎮 Usage Examples
 
-### 🚀 Interactive Terrain Generation (Recommended)
+### 🚀 Terrain Generation with Mission Planning
 
 ```bash
-# Generate terrain with interactive 3D viewer
+# Generate terrain with mission simulation
+python pipeline_demo.py --prompt "alpine valley with river" --simulate-path
+
+# Generate with interactive 3D viewer
 python pipeline_demo.py --prompt "majestic mountain lake with forested shores" --interactive-3d
 
-# Quick generation without interaction
-python pipeline_demo.py --prompt "vast desert dunes with rocky outcrops"
+# Use procedural generation mode
+python pipeline_demo.py --prompt "rolling hills terrain" --mode procedural
+
+# Force AI generation mode
+python pipeline_demo.py --prompt "volcanic landscape" --mode ai
 ```
 
-**Example Prompts:**
-- `"snow-capped mountain peaks with alpine valleys"`
-- `"tropical island with pristine beaches"`
-- `"volcanic landscape with lava craters"`
-- `"rolling hills with dense forest coverage"`
-- `"arctic tundra with frozen lakes"`
+**Example Prompts (with intelligent parsing):**
+- `"snow-capped mountain peaks with alpine valleys"` → Mountain + Snow + Valley features
+- `"tropical island with pristine beaches"` → Island + Beach + Tropical features  
+- `"volcanic landscape with lava craters"` → Volcanic + Crater + Rocky features
+- `"rolling hills with dense forest coverage"` → Hills + Forest + Green features
+- `"arctic tundra with frozen lakes"` → Arctic + Flat + Lake features
 
-### 🎯 Interactive Viewer (Standalone)
+### 🎯 Mission Planning & Pathfinding
+
+The A* pathfinding system provides intelligent route planning with terrain-aware cost analysis:
+
+```bash
+# Generate terrain and plan mission automatically
+python pipeline_demo.py --prompt "mountainous terrain" --simulate-path
+
+# Interactive point selection:
+# 1. Left-click to select start point (red)
+# 2. Right-click to select goal point (blue)  
+# 3. Close the plot window to compute optimal path
+# 4. View results in mission_path_overlay.png
+```
+
+**Cost Analysis Features:**
+- **Elevation Penalty**: Higher elevations increase travel cost
+- **Slope Penalty**: Steep terrain is harder to traverse
+- **Optimal Routing**: A* algorithm finds lowest-cost path
+- **Visual Feedback**: Path displayed with cost information
+
+### � Interactive Viewer (Standalone)
 
 ```bash
 # View latest generated terrain interactively
 python interactive_terrain_viewer.py --latest
 
-# View specific terrain session
+# View specific terrain session  
 python interactive_terrain_viewer.py --session session_1759684013
 
 # List all available sessions
 python interactive_terrain_viewer.py --list
 ```
 
-### 🌐 Web API Server
+### �🌐 Web API Server
 
 ```bash
 # Start REST API server
 python serve.py
 
-# Generate via API
+# Generate terrain via API
 curl -X POST "http://localhost:8000/generate" \
      -H "Content-Type: application/json" \
      -d '{"prompt": "mountain landscape", "interactive": true}'
@@ -177,16 +226,25 @@ Output/session_XXXXXXXXX/
 - **🔬 Research**: AI-driven terrain analysis and generation studies
 - **🎨 Digital Art**: Landscape reference and inspiration generation
 
-## 🚀 Future Roadmap
+## 🚀 Development Roadmap
 
-- [x] **Interactive 3D Visualization** - Complete ✅
-- [x] **Photorealistic Rendering** - Complete ✅  
-- [x] **Web API Integration** - Complete ✅
-- [x] **Multi-format Export** - Complete ✅
-- [ ] **Real-time Terrain Editing** - Planned
-- [ ] **Multi-scale Generation** - Planned
-- [ ] **Custom Model Training** - Available
-- [ ] **Mobile App Support** - Future
+### ✅ Completed Features
+- [x] **Interactive 3D Visualization** - Complete with PyVista
+- [x] **Photorealistic Rendering** - Advanced lighting with SSAO
+- [x] **Mission Planning System** - A* pathfinding with cost analysis  
+- [x] **Multi-Mode Generation** - AI, Procedural, and Diffusion modes
+- [x] **Intelligent Prompt Parsing** - Keyword extraction and feature mapping
+- [x] **Slope-based Color Mapping** - Realistic terrain visualization
+- [x] **Enhanced Metadata System** - Comprehensive terrain analytics
+- [x] **Configuration Management** - Feature flags and modular design
+- [x] **Web API Integration** - REST API for web applications
+
+### 🔄 Future Enhancements  
+- [ ] **Real-time Terrain Editing** - Interactive terrain modification
+- [ ] **Multi-scale Generation** - Hierarchical detail levels
+- [ ] **Weather System Integration** - Dynamic environmental effects
+- [ ] **Multi-agent Mission Planning** - Collaborative pathfinding
+- [ ] **Mobile App Support** - iOS/Android terrain viewer
 
 ## 📄 License
 

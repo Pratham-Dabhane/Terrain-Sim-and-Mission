@@ -56,21 +56,60 @@ env/
 env.bak/
 venv.bak/
 
-# Output folder for generated PNGs
+# Terrain Generation Pipeline Outputs
 Output/
+output/
+generated_*/
+session_*/
+
+# Terrain files and assets
+*.png
+*.jpg
+*.jpeg
+*.vtk
+*.ply
+*.obj
+*.stl
+*.mp4
+*.avi
+*.mov
+
+# Model checkpoints and weights  
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+models/
+checkpoints/
+weights/
+
+# Diffusion model cache
+diffusers_cache/
+huggingface_hub/
+.cache/huggingface/
+
+# Mission planning outputs
+mission_*.png
+path_*.json
+cost_analysis_*.csv
 
 # OS files
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Logs
+# Logs and temporary files
 *.log
+*.tmp
+*.temp
+temp/
+tmp/
 
 # Python virtual environment
 *.virtualenv
 
 # PyInstaller
-*.manifest
+*.manifest  
 *.spec
 
 # MyPy
@@ -78,4 +117,5 @@ Thumbs.db
 .dmypy.json
 dmypy.json
 
-# Pyre type
+# Pyre type checker
+.pyre/

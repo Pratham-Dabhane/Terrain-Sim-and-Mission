@@ -1,32 +1,67 @@
-# AI-Powered Terrain Generation Pipeline
+# AI-Powered Terrain Generation & Mission Planning Pipeline
 
-A complete end-to-end system for generating realistic 3D terrains from text descriptions using state-of-the-art AI techniques including CLIP-conditioned Wasserstein GANs, Stable Diffusion, and ControlNet.
+A comprehensive end-to-end system for generating realistic 3D terrains from text descriptions and providing intelligent mission planning capabilities. Built with state-of-the-art AI techniques including CLIP-conditioned Wasserstein GANs, procedural generation, Stable Diffusion, and A* pathfinding algorithms.
 
-## 🚀 Features
+## 🚀 Core Features
 
-- **Text-to-Terrain Generation**: Generate heightmaps from natural language descriptions
-- **CLIP-Conditioned aWCGAN**: Advanced Wasserstein GAN with gradient penalty and CLIP text conditioning
-- **Stable Diffusion Enhancement**: Remaster heightmaps with photorealistic textures using ControlNet
-- **3D Mesh Generation**: Convert heightmaps to interactive 3D meshes using PyVista
+### 🎯 Multi-Mode Terrain Generation
+- **AI-Powered Generation**: CLIP-conditioned aWCGAN with advanced text understanding
+- **Procedural Generation**: Fractal Brownian Motion (fBM) noise with terrain variants  
+- **AI Diffusion**: Optional Stable Diffusion + ControlNet heightmap enhancement
+- **Intelligent Prompt Parsing**: Automatic keyword extraction and feature mapping
+
+### 🎨 Advanced Visualization
+- **Photorealistic Rendering**: Cinema-quality 3D visualization with SSAO and advanced lighting
+- **Slope-based Color Mapping**: Realistic terrain coloring based on elevation and gradients
+- **Multi-light Setup**: Golden hour lighting with 4-point illumination system
+- **High-Resolution Output**: Ultra-HD (1920x1080) static terrain visualization
+
+### 🚁 Mission Planning System  
+- **A* Pathfinding**: Terrain-aware route optimization with cost analysis
+- **Interactive Point Selection**: Click-to-select start and goal points
+- **Cost Analysis**: Elevation and slope-based navigation difficulty assessment
+- **Mission Visualization**: Path overlay with waypoint tracking and statistics
+
+### 🔧 Technical Capabilities
 - **Memory Optimization**: Designed for low VRAM systems (GTX 1650, 4GB VRAM)
-- **FastAPI Server**: REST API for web deployment
-- **Multiple Export Formats**: PLY, OBJ, STL mesh export capabilities
+- **Configuration System**: Feature flags for modular component control
+- **Enhanced Metadata**: Comprehensive terrain analytics and generation statistics
+- **FastAPI Server**: REST API for web deployment and integration
+- **Multiple Export Formats**: PLY, OBJ, STL, VTK mesh export capabilities
 
-## 🏗️ Architecture
+## 🏗️ System Architecture
 
 ```
-Text Prompt → CLIP Encoder → aWCGAN Generator → Heightmap → ControlNet → Enhanced Image → 3D Mesh
+Text Input → Prompt Parser → Generation Router → Terrain Enhancement → Mission Planning
+     ↓             ↓              ↓                    ↓                ↓ 
+"mountain lake" → Keywords → [AI/Procedural/Diffusion] → Color Mapping → A* Pathfinding
+     ↓             ↓              ↓                    ↓                ↓
+   Config → Feature Flags → Multi-mode Pipeline → 3D Rendering → Interactive Viewer
 ```
 
-### Pipeline Components
+### Core Pipeline Components
 
-1. **CLIP Text Encoder** (`clip_encoder.py`): Converts text prompts to embeddings
-2. **aWCGAN Models** (`models_awcgan.py`): Generator and Critic with FiLM/AdaIN conditioning
-3. **Training System** (`train_awcgan.py`): Memory-efficient training loop for GTX 1650
-4. **SD Remastering** (`remaster_sd_controlnet.py`): Stable Diffusion + ControlNet enhancement
-5. **3D Visualization** (`mesh_visualize.py`): PyVista-based mesh generation and rendering
-6. **Data Pipeline** (`data.py`): DES heightmap dataset loader
-7. **API Server** (`serve.py`): FastAPI endpoint for web deployment
+#### 🧠 AI & Text Processing
+1. **CLIP Text Encoder** (`clip_encoder.py`): Advanced text-to-embedding conversion with prompt enhancement
+2. **Prompt Parser** (`prompt_parser.py`): Intelligent keyword extraction with 20+ terrain features
+3. **aWCGAN Models** (`models_awcgan.py`): Generator and Critic with FiLM/AdaIN conditioning
+4. **AI Heightmap Generator** (`ai_heightmap_generator.py`): Optional diffusion-based terrain generation
+
+#### 🌍 Terrain Generation & Enhancement  
+5. **Procedural Noise Utils** (`procedural_noise_utils.py`): fBM fractal terrain generation with variants
+6. **Terrain Texture Mapper** (`terrain_texture_mapper.py`): Slope-based realistic color mapping
+7. **Realistic Terrain Enhancer** (`realistic_terrain_enhancer.py`): SD + ControlNet enhancement
+8. **Advanced Terrain Renderer** (`advanced_terrain_renderer.py`): Cinema-quality 3D visualization
+
+#### 🚁 Mission Planning & Visualization
+9. **Mission Simulator** (`mission_simulator.py`): A* pathfinding with interactive point selection
+10. **Mesh Visualizer** (`mesh_visualize.py`): PyVista-based 3D mesh generation and rendering
+11. **Configuration System** (`config.py`): Feature flags and modular component control
+
+#### 🔧 Supporting Systems
+12. **Training System** (`train_awcgan.py`): Memory-efficient training loop for GTX 1650
+13. **Data Pipeline** (`data.py`): DES heightmap dataset loader with preprocessing
+14. **API Server** (`serve.py`): FastAPI endpoint for web deployment and integration
 
 ## 🔧 Installation
 
@@ -57,25 +92,51 @@ pip install xformers
 
 ## 🚀 Quick Start
 
-### Option 1: Interactive Demo
+### Option 1: Terrain Generation with Mission Planning
 ```bash
-python pipeline_demo.py --mode interactive
+# Complete pipeline with pathfinding
+python pipeline_demo.py --prompt "alpine valley with lakes" --simulate-path
+
+# AI generation mode (default)
+python pipeline_demo.py --prompt "mountainous terrain with rivers" --mode ai
+
+# Procedural generation mode  
+python pipeline_demo.py --prompt "rolling hills landscape" --mode procedural
 ```
 
-### Option 2: Single Generation
+### Option 2: Interactive 3D Exploration
 ```bash
-python pipeline_demo.py --prompt "mountainous terrain with rivers and valleys" --seed 42
+# Generate with interactive viewer
+python pipeline_demo.py --prompt "volcanic landscape" --interactive-3d
+
+# View existing terrain sessions
+python interactive_terrain_viewer.py --latest
 ```
 
-### Option 3: API Server
+### Option 3: API Server & Integration
 ```bash
-# Start the server
+# Start the REST API server
 python serve.py
 
-# Make a request
+# Generate terrain via API
 curl -X POST "http://localhost:8000/generate" \
      -H "Content-Type: application/json" \
-     -d '{"prompt": "volcanic landscape with craters"}'
+     -d '{"prompt": "snow-capped mountain peaks", "mode": "ai"}'
+```
+
+### Option 4: Configuration-based Generation
+```python
+from pipeline.config import PipelineConfig, get_default_config
+
+# Customize pipeline features
+config = get_default_config()
+config.mission_sim_enabled = True
+config.photorealistic_render_enabled = True
+config.ai_heightmap_enabled = False
+
+# Run with custom config
+pipeline = TerrainPipelineDemo(config=config)
+result = pipeline.generate_terrain("desert oasis with palm trees")
 ```
 
 ## 📚 Usage Examples
