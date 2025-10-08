@@ -30,7 +30,7 @@ class PipelineConfig:
     
     # Experimental/future features (default: disabled)
     ai_heightmap_enabled: bool = False         # Enable AI-enhanced heightmap processing
-    mission_sim_enabled: bool = False          # Enable mission simulation features
+    mission_sim_enabled: bool = True           # Enable mission simulation features
     
     # =============================================================================
     # 📐 SIZE CONFIGURATIONS

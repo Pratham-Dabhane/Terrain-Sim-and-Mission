@@ -716,6 +716,8 @@ if __name__ == "__main__":
                        help="Disable Stable Diffusion remastering")
     parser.add_argument("--interactive-3d", action="store_true",
                        help="Launch interactive 3D viewer after generation")
+    parser.add_argument("--simulate-path", action="store_true",
+                       help="Enable interactive mission path simulation")
     
     args = parser.parse_args()
     
@@ -759,6 +761,31 @@ if __name__ == "__main__":
                             
                     except Exception as e:
                         print(f"❌ Failed to launch interactive viewer: {e}")
+                
+                # Launch mission simulation if requested
+                if args.simulate_path or pipeline.config.mission_sim_enabled:
+                    try:
+                        print("\n🎯 Launching mission path simulation...")
+                        from pipeline.mission_simulator import select_points_and_simulate
+                        
+                        # Use the generated heightmap for mission planning
+                        heightmap = result['heightmap']
+                        session_dir = Path(result['file_paths']['metadata']).parent
+                        
+                        # Run interactive mission simulation
+                        mission_output = select_points_and_simulate(
+                            heightmap=heightmap, 
+                            output_dir=str(session_dir)
+                        )
+                        
+                        if mission_output:
+                            print(f"✓ Mission simulation completed: {mission_output}")
+                        else:
+                            print("❌ Mission simulation was cancelled or failed")
+                            
+                    except Exception as e:
+                        print(f"❌ Failed to launch mission simulation: {e}")
+                        logger.error(f"Mission simulation error: {e}")
             else:
                 print(f"✗ Failed: {result.get('error', 'Unknown error')}")
                 
