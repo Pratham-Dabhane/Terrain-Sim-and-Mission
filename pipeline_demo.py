@@ -244,8 +244,18 @@ class TerrainPipelineDemo:
             tuple: (enhanced_image, enhanced_heightmap)
         """
         if not self.enhancer:
-            logger.info("Terrain enhancer disabled, using basic grayscale")
-            # Create basic grayscale image
+            logger.info("Terrain enhancer disabled")
+            
+            # Check if texture mapping is enabled
+            if self.config.texture_mapping_enabled:
+                logger.info("Using slope-based color mapping for terrain visualization")
+                from pipeline.terrain_texture_mapper import colorize_by_elevation_and_slope
+                enhanced = colorize_by_elevation_and_slope(heightmap)
+                enhanced = enhanced.resize(output_size)
+                return enhanced, heightmap
+            
+            # Fallback to basic grayscale
+            logger.info("Using basic grayscale fallback")
             enhanced = Image.fromarray((heightmap * 255).astype(np.uint8))
             enhanced = enhanced.convert('RGB').resize(output_size)
             return enhanced, heightmap
@@ -431,9 +441,17 @@ class TerrainPipelineDemo:
                 )
                 final_heightmap = enhanced_heightmap
             else:
-                # Use original heightmap
-                enhanced_image = Image.fromarray((heightmap * 255).astype(np.uint8))
-                enhanced_image = enhanced_image.convert('RGB').resize(output_size)
+                # Check if texture mapping is enabled for fallback coloring
+                if self.config.texture_mapping_enabled:
+                    logger.info("Remastering disabled - using slope-based color mapping")
+                    from pipeline.terrain_texture_mapper import colorize_by_elevation_and_slope
+                    enhanced_image = colorize_by_elevation_and_slope(heightmap)
+                    enhanced_image = enhanced_image.resize(output_size)
+                else:
+                    # Basic grayscale fallback
+                    logger.info("Remastering disabled - using basic grayscale")
+                    enhanced_image = Image.fromarray((heightmap * 255).astype(np.uint8))
+                    enhanced_image = enhanced_image.convert('RGB').resize(output_size)
                 final_heightmap = heightmap
             
             # Step 3: Generate 3D mesh
