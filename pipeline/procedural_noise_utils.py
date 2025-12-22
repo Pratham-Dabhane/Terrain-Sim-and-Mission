@@ -7,6 +7,7 @@ import numpy as np
 from typing import Tuple, Dict, Any, Optional
 import logging
 from dataclasses import dataclass
+import noise  # Perlin noise library
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def fbm(shape: Tuple[int, int], scale: float = 100.0, octaves: int = 6,
         persistence: float = 0.5, lacunarity: float = 2.0, 
         seed: Optional[int] = None) -> np.ndarray:
     """
-    Generate fractal Brownian motion (fBM) noise.
+    Generate fractal Brownian motion (fBM) noise using real Perlin noise.
     
     Args:
         shape: Output shape (height, width)
@@ -45,55 +46,42 @@ def fbm(shape: Tuple[int, int], scale: float = 100.0, octaves: int = 6,
     Returns:
         np.ndarray: fBM noise array with values roughly in [-1, 1]
     """
-    if seed is not None:
-        np.random.seed(seed)
-    
     height, width = shape
     result = np.zeros((height, width), dtype=np.float32)
     
-    # Create coordinate grids
-    x = np.linspace(0, 1, width, dtype=np.float32)
-    y = np.linspace(0, 1, height, dtype=np.float32)
-    X, Y = np.meshgrid(x, y)
+    # Use seed for reproducibility
+    base_seed = seed if seed is not None else 0
     
-    amplitude = 1.0
-    frequency = 1.0 / scale
-    max_value = 0.0  # Used for normalization
+    logger.info(f"Generating Perlin noise: {height}x{width}, octaves={octaves}, this may take a moment...")
     
-    for octave in range(octaves):
-        # Generate Perlin-like noise using sine waves (simplified approach)
-        # In production, you'd use proper Perlin/Simplex noise
-        noise_x = X * frequency * 2 * np.pi
-        noise_y = Y * frequency * 2 * np.pi
-        
-        # Create multiple sine wave patterns for pseudo-Perlin noise
-        noise = (
-            np.sin(noise_x + np.random.random() * 2 * np.pi) * 
-            np.cos(noise_y + np.random.random() * 2 * np.pi) +
-            np.sin(noise_x * 2.1 + np.random.random() * 2 * np.pi) * 
-            np.cos(noise_y * 1.9 + np.random.random() * 2 * np.pi) * 0.5 +
-            np.sin(noise_x * 0.7 + np.random.random() * 2 * np.pi) * 
-            np.cos(noise_y * 1.3 + np.random.random() * 2 * np.pi) * 0.25
-        )
-        
-        result += noise * amplitude
-        max_value += amplitude
-        
-        amplitude *= persistence
-        frequency *= lacunarity
+    # Generate coordinates scaled by frequency
+    frequency_val = 1.0 / scale
     
-    # Normalize to roughly [-1, 1]
-    if max_value > 0:
-        result /= max_value
+    # Use pnoise2's built-in octaves for faster generation
+    for i in range(height):
+        for j in range(width):
+            x = j * frequency_val
+            y = i * frequency_val
+            
+            # Let pnoise2 handle all octaves internally (much faster)
+            result[i, j] = noise.pnoise2(
+                x, y,
+                octaves=octaves,  # Use built-in octaves
+                persistence=persistence,
+                lacunarity=lacunarity,
+                repeatx=1024,
+                repeaty=1024,
+                base=base_seed
+            )
     
-    logger.debug(f"Generated fBM: shape={shape}, octaves={octaves}, range=[{result.min():.3f}, {result.max():.3f}]")
+    logger.info(f"✓ Perlin noise generated: range=[{result.min():.3f}, {result.max():.3f}]")
     return result
 
 
 def generate_river_pattern(shape: Tuple[int, int], frequency: float = 0.05, 
                           strength: float = 0.3, seed: Optional[int] = None) -> np.ndarray:
     """
-    Generate river-like patterns using sine/cosine waves.
+    Generate river-like patterns using Perlin noise with directional bias.
     
     Args:
         shape: Output shape (height, width)
@@ -104,25 +92,30 @@ def generate_river_pattern(shape: Tuple[int, int], frequency: float = 0.05,
     Returns:
         np.ndarray: River pattern array
     """
-    if seed is not None:
-        np.random.seed(seed + 1000)  # Offset seed for rivers
-    
     height, width = shape
+    base_seed = (seed + 1000) if seed is not None else 1000
     
-    # Create coordinate grids
-    x = np.linspace(0, width, width, dtype=np.float32)
-    y = np.linspace(0, height, height, dtype=np.float32)
-    X, Y = np.meshgrid(x, y)
+    rivers = np.zeros((height, width), dtype=np.float32)
     
-    # Generate multiple river patterns
-    river1 = np.sin(X * frequency) * np.cos(Y * frequency)
-    river2 = np.sin(X * frequency * 1.3 + np.pi/4) * np.cos(Y * frequency * 0.7 + np.pi/3)
-    river3 = np.sin(X * frequency * 0.6 + np.pi/2) * np.cos(Y * frequency * 1.5 + np.pi/6)
+    # Generate river patterns with directional flow
+    for i in range(height):
+        for j in range(width):
+            x = j * frequency
+            y = i * frequency
+            
+            # Sample multiple noise layers for river-like features
+            river_value = (
+                noise.pnoise2(x, y, octaves=2, persistence=0.5, 
+                            lacunarity=2.0, repeatx=1024, repeaty=1024, 
+                            base=base_seed) +
+                noise.pnoise2(x * 0.5, y * 2.0, octaves=1, 
+                            repeatx=1024, repeaty=1024, 
+                            base=base_seed + 100) * 0.5
+            )
+            
+            rivers[i, j] = river_value
     
-    # Combine river patterns
-    rivers = (river1 + river2 * 0.6 + river3 * 0.4) / 2.0
-    
-    # Apply strength and take absolute value for carving effect
+    # Apply carving effect - rivers are valleys
     rivers = np.abs(rivers) * strength
     
     logger.debug(f"Generated rivers: frequency={frequency}, strength={strength}, range=[{rivers.min():.3f}, {rivers.max():.3f}]")

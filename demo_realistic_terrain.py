@@ -41,9 +41,11 @@ def run_terrain_demos():
         start_time = time.time()
         
         try:
+            # Use deterministic seed based on prompt (different for each due to different prompts)
+            # Override seed parameter removed - will use hash-based deterministic seed
             result = pipeline.run_pipeline(
                 prompt=prompt,
-                seed=42 + i,  # Different seed for variety
+                seed=None,  # Use deterministic seed from prompt
                 enable_remastering=True
             )
             

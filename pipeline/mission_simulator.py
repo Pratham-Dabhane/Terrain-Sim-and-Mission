@@ -237,6 +237,20 @@ def select_points_and_simulate(heightmap: np.ndarray, output_dir: str = "Output"
         print("🧮 Computing terrain cost map...")
         costmap = compute_costmap(heightmap)
         
+        # Save cost map visualization
+        costmap_path = os.path.join(output_dir, "cost_map.png")
+        fig_cost, ax_cost = plt.subplots(figsize=(10, 8))
+        im_cost = ax_cost.imshow(costmap, cmap='hot', origin='upper')
+        ax_cost.set_title("Terrain Cost Map", fontsize=14, fontweight='bold')
+        ax_cost.set_xlabel("X Coordinate")
+        ax_cost.set_ylabel("Y Coordinate")
+        plt.colorbar(im_cost, ax=ax_cost, label='Traversal Cost')
+        ax_cost.set_xticks([])
+        ax_cost.set_yticks([])
+        fig_cost.savefig(costmap_path, dpi=150, bbox_inches='tight')
+        plt.close(fig_cost)
+        logger.info(f"✓ Cost map saved to: {costmap_path}")
+        
         # Find optimal path using A* algorithm
         print("🔍 Searching for optimal path...")
         path = a_star_search(costmap, start, goal)

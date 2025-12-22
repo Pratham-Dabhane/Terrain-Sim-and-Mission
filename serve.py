@@ -27,6 +27,7 @@ try:
     from models_awcgan import CLIPConditionedGenerator
     from remaster_sd_controlnet import TerrainRemaster
     from mesh_visualize import TerrainMeshGenerator, TerrainVisualizer, MeshExporter
+    from prompt_parameters import parse_prompt, get_seed_from_prompt, TerrainParameters
 except ImportError as e:
     logging.warning(f"Some pipeline modules not available: {e}")
 
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 class TerrainGenerationRequest(BaseModel):
     prompt: str = Field(..., description="Text description of the terrain")
     negative_prompt: Optional[str] = Field("blurry, low quality, distorted", description="Negative prompt")
-    seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    seed: Optional[int] = Field(None, description="Random seed for reproducibility (if None, uses deterministic seed from prompt hash)")
     width: int = Field(512, ge=256, le=1024, description="Output width")
     height: int = Field(512, ge=256, le=1024, description="Output height")
     num_inference_steps: int = Field(20, ge=10, le=50, description="Number of diffusion steps")
@@ -183,6 +184,19 @@ class TerrainPipeline:
         }
         
         try:
+            # Step 0: Parse prompt to extract parameters
+            if progress_callback:
+                await progress_callback(task_id, 0.05, "Parsing prompt parameters...")
+            
+            # Parse prompt to get terrain parameters (uses deterministic seed if not provided)
+            parameters = parse_prompt(request.prompt, override_seed=request.seed)
+            effective_seed = parameters.seed
+            
+            logger.info(f"Using parameters: seed={effective_seed}, biome={parameters.biome_type}, "
+                       f"style={parameters.terrain_style}, size={parameters.heightmap_size}")
+            
+            results["metadata"]["parsed_parameters"] = parameters.to_dict()
+            
             # Step 1: Generate heightmap with GAN
             if progress_callback:
                 await progress_callback(task_id, 0.1, "Encoding text prompt...")
@@ -193,11 +207,12 @@ class TerrainPipeline:
                     request.prompt, enhance_prompts=True
                 )
                 
-                # Generate noise
-                if request.seed is not None:
-                    torch.manual_seed(request.seed)
-                    np.random.seed(request.seed)
+                # Set deterministic seed
+                torch.manual_seed(effective_seed)
+                np.random.seed(effective_seed)
+                logger.info(f"Using seed: {effective_seed}")
                 
+                # Generate noise
                 noise = torch.randn(1, self.config.noise_dim, device=self.device)
                 
                 # Generate heightmap
@@ -232,7 +247,7 @@ class TerrainPipeline:
                         guidance_scale=request.guidance_scale,
                         controlnet_conditioning_scale=request.controlnet_scale,
                         output_size=(request.width, request.height),
-                        seed=request.seed
+                        seed=effective_seed
                     )
                     
                     # Save remastered image

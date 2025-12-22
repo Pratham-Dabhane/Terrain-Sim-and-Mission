@@ -72,7 +72,7 @@ class TerrainPipelineDemo:
                 embedding_dim=512,
                 device=self.device
             )
-            logger.info("✓ CLIP encoder initialized")
+            logger.info("[OK] CLIP encoder initialized")
             
             # GAN generator
             self.generator = CLIPConditionedGenerator(
@@ -86,16 +86,16 @@ class TerrainPipelineDemo:
             if checkpoint_path.exists():
                 checkpoint = torch.load(checkpoint_path, map_location=self.device)
                 self.generator.load_state_dict(checkpoint['generator_state_dict'])
-                logger.info("✓ GAN generator initialized with pre-trained weights")
+                logger.info("[OK] GAN generator initialized with pre-trained weights")
             else:
-                logger.info("✓ GAN generator initialized (using random weights)")
+                logger.info("[OK] GAN generator initialized (using random weights)")
             
             self.generator.eval()
             
             # Realistic terrain enhancer
             try:
                 self.enhancer = RealisticTerrainEnhancer()
-                logger.info("✓ Realistic terrain enhancer initialized")
+                logger.info("[OK] Realistic terrain enhancer initialized")
             except Exception as e:
                 logger.warning(f"Terrain enhancer initialization failed: {e}")
                 self.enhancer = None
@@ -105,8 +105,8 @@ class TerrainPipelineDemo:
             self.visualizer = TerrainVisualizer()
             self.exporter = MeshExporter()
             self.advanced_renderer = AdvancedTerrainRenderer()
-            logger.info("✓ 3D mesh components initialized")
-            logger.info("✓ Advanced photorealistic renderer initialized")
+            logger.info("[OK] 3D mesh components initialized")
+            logger.info("[OK] Advanced photorealistic renderer initialized")
             
             logger.info("Pipeline initialization complete!")
             

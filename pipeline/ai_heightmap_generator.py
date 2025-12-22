@@ -119,17 +119,19 @@ class AIHeightmapGenerator:
         size: Tuple[int, int] = (256, 256),
         num_inference_steps: int = 20,
         guidance_scale: float = 7.5,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        parameters: Optional['TerrainParameters'] = None
     ) -> Optional[np.ndarray]:
         """
         Generate heightmap from text prompt using diffusion model.
         
         Args:
             prompt (str): Text description of terrain
-            size (Tuple[int, int]): Output size (width, height)
+            size (Tuple[int, int]): Output size (width, height) - overridden by parameters if provided
             num_inference_steps (int): Number of diffusion steps (fewer = faster)
             guidance_scale (float): How closely to follow the prompt
-            seed (Optional[int]): Random seed for reproducibility
+            seed (Optional[int]): Random seed for reproducibility - overridden by parameters if provided
+            parameters (Optional[TerrainParameters]): Pre-parsed terrain parameters from prompt_parameters
             
         Returns:
             Optional[np.ndarray]: Generated heightmap (0-1) or None if failed
@@ -139,11 +141,17 @@ class AIHeightmapGenerator:
             return None
         
         try:
+            # Use parameters if provided
+            if parameters is not None:
+                size = parameters.heightmap_size
+                seed = parameters.seed
+                logger.info(f"Using parameters: size={size}, seed={seed}")
+            
             # Enhance prompt for heightmap generation
             heightmap_prompt = self._enhance_prompt_for_heightmap(prompt)
             logger.info(f"Generating AI heightmap for: '{heightmap_prompt}'")
             
-            # Set random seed if provided
+            # Set random seed
             if seed is not None:
                 torch.manual_seed(seed)
                 if torch.cuda.is_available():

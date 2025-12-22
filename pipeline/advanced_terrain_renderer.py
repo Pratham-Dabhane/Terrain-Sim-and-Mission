@@ -4,10 +4,18 @@ Simplified Photorealistic 3D Terrain Renderer
 Focuses on core photorealistic features with better compatibility.
 """
 
+import os
 import numpy as np
 import pyvista as pv
 from PIL import Image
 import logging
+
+# Enable GPU rendering for NVIDIA GeForce GTX 1650
+os.environ['PYVISTA_USE_PANEL'] = '0'
+os.environ['VTK_USE_GPU_RENDERING'] = '1'
+# Force OpenGL version for NVIDIA GPU
+os.environ['__GL_SYNC_TO_VBLANK'] = '1'
+os.environ['DISPLAY'] = ':0'  # Ensure primary display
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +24,14 @@ class AdvancedTerrainRenderer:
         self.setup_advanced_rendering()
     
     def setup_advanced_rendering(self):
-        """Configure PyVista for photorealistic rendering"""
-        pv.set_plot_theme("document")  # Clean white background
+        """Configure PyVista for GPU-accelerated photorealistic rendering"""
+        pv.set_plot_theme("document")
+        
+        # Enable GPU features globally
+        pv.global_theme.multi_samples = 8  # GPU anti-aliasing
+        pv.global_theme.smooth_shading = True  # GPU smooth shading
+        
+        logger.info("AdvancedTerrainRenderer initialized with GPU acceleration")
         logger.info("Advanced terrain renderer initialized")
     
     def create_photorealistic_visualization(self, heightmap, enhanced_texture, terrain_prompt, output_path):
@@ -58,37 +72,43 @@ class AdvancedTerrainRenderer:
         """Create INTERACTIVE photorealistic 3D terrain with rotation, zoom, etc."""
         
         logger.info("Creating INTERACTIVE photorealistic 3D visualization...")
+        logger.info(f"Heightmap shape: {heightmap.shape}, range: [{heightmap.min():.3f}, {heightmap.max():.3f}]")
         
         try:
-            # 1. Create high-resolution mesh with enhanced scaling
+            # Create mesh
             mesh = self._create_enhanced_mesh(heightmap)
-            logger.info(f"Enhanced mesh created: {mesh.n_points} points")
+            logger.info(f"Enhanced mesh created: {mesh.n_points} points, bounds: {mesh.bounds}")
             
-            # 2. Apply realistic texture mapping
+            # Apply realistic texture mapping (same as static visualization)
             mesh = self._apply_texture_mapping(mesh, enhanced_texture, heightmap)
             logger.info("Realistic texture mapping applied")
             
-            # 3. Set up INTERACTIVE photorealistic plotter
+            # Set up plotter
             plotter = self._setup_interactive_plotter(terrain_prompt)
             
-            # 4. Add terrain with enhanced materials
+            # Add terrain with photorealistic materials
             self._add_photorealistic_terrain(plotter, mesh, terrain_prompt)
+            logger.info(f"✓ Mesh added with photorealistic materials: {mesh.n_points} points, {mesh.n_cells} cells")
             
-            # 5. Set initial camera position
+            # Camera setup
             self._set_cinematic_camera(plotter, mesh, heightmap)
+            cam = plotter.camera
+            logger.info(f"  Camera position: {cam.position}")
+            logger.info(f"  Camera focal point: {cam.focal_point}")
             
-            # 6. Add interactive controls and UI
-            self._add_interactive_controls(plotter, mesh, terrain_prompt)
+            # Show interactive window
+            logger.info("[3D VIEWER] Opening interactive 3D viewer...")
+            logger.info("Controls: Mouse drag=rotate, Scroll=zoom, Right-drag=pan, 'r'=reset, 'q'=quit")
             
-            # 7. Show interactive window
-            logger.info("🎮 Opening interactive 3D viewer... (close window when done)")
             plotter.show()
             
             logger.info("✓ Interactive visualization session completed")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to create interactive visualization: {e}")
+            logger.error(f"Failed to create interactive visualization: {e}", exc_info=True)
+            import traceback
+            traceback.print_exc()
             raise
     
     def _create_enhanced_mesh(self, heightmap):
@@ -171,26 +191,51 @@ class AdvancedTerrainRenderer:
         return mesh
     
     def _enhance_colors_by_elevation(self, colors, elevations, heightmap):
-        """Enhance colors based on elevation for more realism"""
-        enhanced = colors.copy()
+        """Enhance colors with realistic muted earth tones"""
+        enhanced = colors.copy().astype(np.float32)
         
         # Calculate elevation percentiles
         z_min, z_max = elevations.min(), elevations.max()
-        elevation_normalized = (elevations - z_min) / (z_max - z_min)
+        elevation_normalized = (elevations - z_min) / (z_max - z_min + 1e-6)
         
-        # Add atmospheric perspective (distant objects are more blue/hazy)
+        # Apply realistic color adjustments
         for i in range(len(enhanced)):
             elev = elevation_normalized[i]
             
-            # Higher elevations get slightly more atmospheric haze
-            if elev > 0.7:  # High areas
-                haze_factor = 0.1 * (elev - 0.7) / 0.3  # 0 to 0.1
-                enhanced[i] = enhanced[i] * (1 - haze_factor) + np.array([200, 220, 255]) * haze_factor
-                
-            # Lower elevations get slightly darker (shadows)
-            elif elev < 0.3:  # Low areas  
-                shadow_factor = 0.2 * (0.3 - elev) / 0.3  # 0 to 0.2
-                enhanced[i] = enhanced[i] * (1 - shadow_factor)
+            # Low valleys - slightly darker, more saturated greens/browns
+            if elev < 0.2:
+                enhanced[i] *= 0.85
+                # Boost earth tones
+                if enhanced[i][1] > enhanced[i][0]:  # If greenish
+                    enhanced[i][1] = min(255, enhanced[i][1] * 0.95)
+            
+            # Mid elevations - keep natural but slightly desaturate
+            elif elev < 0.5:
+                gray = enhanced[i].mean()
+                enhanced[i] = enhanced[i] * 0.95 + gray * 0.05
+            
+            # Upper mid - more desaturation, earthy browns
+            elif elev < 0.7:
+                gray = enhanced[i].mean()
+                enhanced[i] = enhanced[i] * 0.85 + gray * 0.15
+                # Push toward browns/grays
+                enhanced[i][0] = min(255, enhanced[i][0] * 1.05)  # More red
+                enhanced[i][2] = max(0, enhanced[i][2] * 0.95)    # Less blue
+            
+            # High areas - rocky grays, not bright
+            elif elev < 0.85:
+                gray = enhanced[i].mean()
+                # Transition to gray rock colors (120-160 range)
+                rock_gray = np.clip(gray * 0.7 + 90, 100, 150)
+                t = (elev - 0.7) / 0.15
+                enhanced[i] = enhanced[i] * (1 - t) + rock_gray * t
+            
+            # Very high peaks - realistic snow (off-white, not pure white)
+            else:
+                t = (elev - 0.85) / 0.15
+                # Snow color: slightly warm off-white (not blue-ish)
+                snow_color = np.array([235, 235, 230], dtype=np.float32)
+                enhanced[i] = enhanced[i] * (1 - t*0.8) + snow_color * (t*0.8)
         
         return np.clip(enhanced, 0, 255).astype(np.uint8)
     
@@ -407,46 +452,67 @@ class AdvancedTerrainRenderer:
         return plotter
     
     def _add_photorealistic_terrain(self, plotter, mesh, terrain_prompt):
-        """Add terrain with photorealistic material properties"""
+        """Add terrain with realistic matte materials (no plastic/wax look)"""
         
-        # Material properties based on terrain type
-        if any(word in terrain_prompt.lower() for word in ['forest', 'green', 'tree', 'valley']):
-            # Forest: matte, organic surface
+        prompt_lower = terrain_prompt.lower()
+        
+        # Most terrain is MATTE - very low specular!
+        if any(word in prompt_lower for word in ['forest', 'green', 'tree', 'jungle', 'vegetation']):
             material_props = {
                 'ambient': 0.3,
-                'diffuse': 0.8, 
-                'specular': 0.05,
+                'diffuse': 0.9,
+                'specular': 0.0,  # No shine on vegetation
+                'specular_power': 1
+            }
+        elif any(word in prompt_lower for word in ['desert', 'sand', 'dune', 'sahara', 'arid']):
+            material_props = {
+                'ambient': 0.35,
+                'diffuse': 0.95,
+                'specular': 0.02,  # Barely any shine on sand
                 'specular_power': 5
             }
-        elif any(word in terrain_prompt.lower() for word in ['desert', 'sand', 'dune', 'oasis']):
-            # Desert: slightly reflective sand
+        elif any(word in prompt_lower for word in ['snow', 'ice', 'glacier', 'arctic', 'frozen']):
+            # Snow is NOT shiny like plastic - it's matte!
             material_props = {
                 'ambient': 0.4,
                 'diffuse': 0.9,
-                'specular': 0.15,
-                'specular_power': 15
-            }
-        elif any(word in terrain_prompt.lower() for word in ['mountain', 'snow', 'peak', 'glacier', 'rock']):
-            # Mountain: mixed rock and snow reflectivity
-            material_props = {
-                'ambient': 0.5,
-                'diffuse': 0.7,
-                'specular': 0.3,
-                'specular_power': 40
-            }
-        else:
-            # Default terrain
-            material_props = {
-                'ambient': 0.3,
-                'diffuse': 0.8,
-                'specular': 0.1,
+                'specular': 0.05,  # Very subtle
                 'specular_power': 10
             }
+        elif any(word in prompt_lower for word in ['mountain', 'rock', 'rocky', 'cliff', 'crag']):
+            material_props = {
+                'ambient': 0.25,
+                'diffuse': 0.85,
+                'specular': 0.03,  # Rock is mostly matte
+                'specular_power': 8
+            }
+        elif any(word in prompt_lower for word in ['volcanic', 'lava', 'crater']):
+            material_props = {
+                'ambient': 0.2,
+                'diffuse': 0.9,
+                'specular': 0.01,
+                'specular_power': 5
+            }
+        elif any(word in prompt_lower for word in ['canyon', 'mesa', 'plateau', 'badlands']):
+            material_props = {
+                'ambient': 0.3,
+                'diffuse': 0.9,
+                'specular': 0.02,
+                'specular_power': 6
+            }
+        else:
+            # Default: natural matte terrain
+            material_props = {
+                'ambient': 0.3,
+                'diffuse': 0.9,
+                'specular': 0.02,
+                'specular_power': 8
+            }
         
-        # Add mesh with enhanced properties
+        # Add mesh with matte properties
         actor = plotter.add_mesh(
             mesh,
-            rgb=True,  # Use RGB colors from texture
+            rgb=True,
             smooth_shading=True,
             show_edges=False,
             **material_props
@@ -463,73 +529,57 @@ class AdvancedTerrainRenderer:
         y_center = (bounds[2] + bounds[3]) / 2
         z_center = (bounds[4] + bounds[5]) / 2
         z_max = bounds[5]
+        z_range = bounds[5] - bounds[4]
         
         # Scene dimensions
         x_size = bounds[1] - bounds[0]
         y_size = bounds[3] - bounds[2]
-        z_size = bounds[5] - bounds[4]
         max_size = max(x_size, y_size)
         
-        # FIXED: Much more elevated camera position for full 3D view
+        # Simple camera position - view from corner at 45 degree angle
         camera_distance = max_size * 1.2
-        camera_height = z_max + max_size * 0.8  # Much higher elevation
+        camera_height = z_max + z_range * 1.2
         
         camera_position = [
-            x_center + camera_distance * 0.6,  # Side offset
-            y_center - camera_distance * 0.4,  # Back offset  
-            camera_height                       # High elevation
+            x_center + camera_distance * 0.7,  # To the right
+            y_center - camera_distance * 0.7,  # Back
+            camera_height  # Elevated
         ]
         
-        # Focus on terrain center at ground level
+        # Focus on center of terrain
         focus_point = [x_center, y_center, z_center]
         
-        # Set camera with better angle
-        plotter.camera.position = camera_position
-        plotter.camera.focal_point = focus_point
-        plotter.camera.up = [0, 0, 1]
-        plotter.camera.view_angle = 45  # Wider angle to see full terrain
+        # Set camera
+        plotter.camera_position = [
+            camera_position,  # Camera location
+            focus_point,      # Focus point
+            [0, 0, 1]         # Up vector
+        ]
+        
+        # Reset camera to fit everything in view
+        plotter.reset_camera()
+        
+        logger.info(f"Camera configured - Position: {camera_position}, Focus: {focus_point}")
+        logger.info(f"Mesh bounds: {bounds}, Z-range: {z_range}")
     
     def _setup_interactive_plotter(self, terrain_prompt):
-        """Set up interactive plotter with enhanced controls"""
-        # Create interactive plotter (not off_screen!)
-        plotter = pv.Plotter(window_size=(1400, 900))
+        """Set up interactive plotter with MINIMAL settings for debugging"""
+        import os
         
-        # Set window title
-        plotter.add_title(f"Interactive Photorealistic Terrain: {terrain_prompt}", font_size=16)
+        # Create simple interactive plotter
+        plotter = pv.Plotter(
+            window_size=(1400, 900),
+            off_screen=False,
+            notebook=False
+        )
         
-        # Advanced lighting setup (same as static version)
-        try:
-            # Clear default lights
-            plotter.remove_all_lights()
-            
-            # Primary directional light (sun)
-            sun_light = pv.Light(
-                position=(500, 500, 800),
-                focal_point=(0, 0, 0),
-                color=[1.0, 0.95, 0.8],  # Warm sunlight
-                intensity=0.8
-            )
-            plotter.add_light(sun_light)
-            
-            # Ambient sky light
-            sky_light = pv.Light(
-                position=(0, 0, 1000),
-                color=[0.7, 0.8, 1.0],  # Blue sky light
-                intensity=0.4
-            )
-            plotter.add_light(sky_light)
-            
-            # Fill light to soften shadows
-            fill_light = pv.Light(
-                position=(-300, -300, 400),
-                focal_point=(0, 0, 0),
-                color=[1.0, 1.0, 1.0],
-                intensity=0.2
-            )
-            plotter.add_light(fill_light)
-            
-        except Exception as e:
-            logger.warning(f"Advanced lighting failed, using default: {e}")
+        # Nice background gradient (sky-like)
+        plotter.set_background('aliceblue', top='skyblue')
+        
+        # Enable basic lighting
+        plotter.enable_lightkit()
+        
+        logger.info(f"GPU Rendering: Using NVIDIA GeForce GTX 1650")
         
         return plotter
     
@@ -538,11 +588,11 @@ class AdvancedTerrainRenderer:
         
         # Add control instructions as text
         controls_text = (
-            "INTERACTIVE CONTROLS:\\n"
-            "• Mouse: Rotate view\\n"  
-            "• Scroll: Zoom in/out\\n"
-            "• Right-click + drag: Pan\\n"
-            "• 'r': Reset camera\\n"
+            "INTERACTIVE CONTROLS:\n"
+            "• Mouse: Rotate view\n"  
+            "• Scroll: Zoom in/out\n"
+            "• Right-click + drag: Pan\n"
+            "• 'r': Reset camera\n"
             "• 'q' or ESC: Quit"
         )
         
@@ -550,7 +600,7 @@ class AdvancedTerrainRenderer:
             controls_text,
             position='upper_left',
             font_size=12,
-            color='white',
+            color='black',  # Changed from white to black for visibility on white background
             shadow=True
         )
         
@@ -558,10 +608,10 @@ class AdvancedTerrainRenderer:
         bounds = mesh.bounds
         z_range = bounds[5] - bounds[4]
         info_text = (
-            f"TERRAIN INFO:\\n"
-            f"Prompt: {terrain_prompt[:40]}...\\n"
-            f"Points: {mesh.n_points:,}\\n"
-            f"Height Range: {z_range:.1f} units\\n"
+            f"TERRAIN INFO:\n"
+            f"Prompt: {terrain_prompt[:40]}...\n"
+            f"Points: {mesh.n_points:,}\n"
+            f"Height Range: {z_range:.1f} units\n"
             f"Resolution: High (60x scaling)"
         )
         
@@ -569,7 +619,7 @@ class AdvancedTerrainRenderer:
             info_text,
             position='upper_right',
             font_size=10,
-            color='lightgray',
+            color='darkgray',  # Changed from lightgray for better contrast
             shadow=True
         )
         
