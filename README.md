@@ -1,29 +1,38 @@
 # Terrain Simulation and Mission Planning
 
-**AI-powered terrain generation with intelligent mission pathfinding**
+End-to-end terrain generation and mission planning system that turns natural language prompts into 3D landscapes and computes cost-aware navigation paths over them.
 
-A complete pipeline for generating photorealistic 3D terrain from text prompts and planning optimal navigation paths through cost-aware A* pathfinding.
-
----
-
-## 🎯 Features
-
-- **🗺️ Text-to-Terrain Generation**: Generate realistic heightmaps from natural language prompts
-- **🎨 Photorealistic 3D Rendering**: GPU-accelerated interactive visualization with physically-based materials  
-- **🧭 Intelligent Pathfinding**: Cost-aware A* algorithm for optimal route planning
-- **📊 Terrain Analysis**: Automatic cost map generation based on elevation and slope
-- **🎮 Interactive Visualization**: Real-time 3D terrain exploration with mouse controls
-- **💾 Export Support**: VTK mesh export, PNG visualizations, mission overlays
+The project combines procedural terrain synthesis, GPU-accelerated 3D rendering, and an A* planner operating on learned cost maps derived from elevation and slope.
 
 ---
 
-## 🚀 Quick Start
+## Features
+
+- Text-to-terrain generation from natural language prompts using procedural noise and prompt-derived parameters
+- GPU-accelerated 3D terrain rendering with PyVista/VTK (interactive and offline)
+- Cost-aware mission planning via A* on terrain cost maps (elevation, slope, water)
+- Automatic cost-map and path statistics (difficulty, elevation gain/loss, total cost)
+- Image and mesh exports for further analysis (`.png`, `.vtk`)
+- Comprehensive automated tests for parsing, terrain generation, cost maps, and pathfinding
+
+---
+
+## Tech Stack
+
+- Python 3.11
+- Deep learning / generation: PyTorch, TensorFlow, Hugging Face Transformers, Diffusers
+- Geometry & visualization: NumPy, PyVista, VTK, Matplotlib
+- Utilities & tooling: OpenCV, SciPy, Pillow, pytest/pytest-cov
+
+---
+
+## Getting Started
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+
 cd "Terrain Sim and Mission"
 
 # Create virtual environment
@@ -41,31 +50,31 @@ pip install -r requirements_stable.txt
 # Generate terrain with interactive 3D viewer
 python pipeline_demo.py --prompt "snowy mountain peaks" --interactive-3d
 
-# Generate with mission path planning
+# Generate terrain and compute an optimal mission path
 python pipeline_demo.py --prompt "desert dunes" --simulate-path
 
-# Generate without remastering (faster)
+# Faster run without image remastering
 python pipeline_demo.py --prompt "rolling hills" --no-remaster
 ```
 
 ---
 
-## 📖 Pipeline Overview
+## Architecture Overview
 
-### Prompt → Terrain → Planner
+High-level flow from text prompt to mission plan:
 
 ```
 ┌──────────────┐     ┌──────────────────┐     ┌───────────────┐
 │ Text Prompt  │ --> │ Terrain Generator│ --> │ Cost Map      │
 │ "mountains"  │     │ (Perlin Noise)   │     │ (Elevation +  │
 └──────────────┘     └──────────────────┘     │  Slope)       │
-                              │                └───────────────┘
+                              │               └───────────────┘
                               ↓                        │
                      ┌──────────────────┐              ↓
                      │ 3D Mesh          │     ┌───────────────┐
                      │ (PyVista)        │     │ A* Pathfinder │
                      └──────────────────┘     │ (Optimal Path)│
-                              │                └───────────────┘
+                              │               └───────────────┘
                               ↓                        │
                      ┌──────────────────┐              ↓
                      │ Interactive      │     ┌───────────────┐
@@ -73,223 +82,76 @@ python pipeline_demo.py --prompt "rolling hills" --no-remaster
                      └──────────────────┘     └───────────────┘
 ```
 
-### Phase Breakdown
+Component breakdown:
 
-#### Phase 1: Prompt Parsing
-- **Input**: Natural language text (e.g., "snowy mountain peaks")
-- **Process**: Extract keywords, determine terrain type, set generation parameters
-- **Output**: Terrain parameters (octaves, scale, persistence, biome)
-- **Module**: `pipeline/prompt_parser.py`
+- Text Prompt
+  - Free-form user description of the terrain (for example, "snowy mountain peaks" or "sandy desert dunes").
+  - Parsed by the prompt parser in [pipeline/prompt_parser.py](pipeline/prompt_parser.py) into noise and style parameters.
 
-#### Phase 2: Heightmap Generation
-- **Input**: Terrain parameters from Phase 1
-- **Process**: Generate 2D heightmap using multi-octave Perlin noise
-- **Output**: Normalized heightmap array (256×256, values 0-1)
-- **Module**: `pipeline/procedural_noise_utils.py`
-- **Performance**: ~10-12 seconds for 256×256 terrain
+- Terrain Generator (Perlin Noise)
+  - Uses multi-octave Perlin-based fractional Brownian motion to synthesize a normalized heightmap.
+  - Implemented in [pipeline/procedural_noise_utils.py](pipeline/procedural_noise_utils.py).
 
-#### Phase 3: Texture Mapping
-- **Input**: Heightmap from Phase 2
-- **Process**: Apply realistic colors based on elevation and slope
-- **Output**: RGB texture array (256×256×3)
-- **Module**: `pipeline/advanced_terrain_renderer.py`
-- **Color Scheme**: Blues (water) → Greens (lowlands) → Browns (hills) → Grays/White (peaks)
+- Cost Map (Elevation + Slope)
+  - Converts the heightmap into a traversal cost grid by combining elevation, slope, and water thresholds.
+  - Implemented in [pipeline/cost_map.py](pipeline/cost_map.py).
 
-#### Phase 4: 3D Mesh Generation
-- **Input**: Heightmap + texture
-- **Process**: Create structured 3D mesh with elevation-based coloring
-- **Output**: PyVista mesh object (65,536 points, 130,050 cells)
-- **Module**: `pipeline/mesh_visualize.py`
-- **Export**: VTK format for external tools
+- 3D Mesh (PyVista)
+  - Lifts the heightmap into 3D, applies realistic terrain colouring, and builds a renderable mesh.
+  - Implemented in [pipeline/advanced_terrain_renderer.py](pipeline/advanced_terrain_renderer.py) and [pipeline/mesh_visualize.py](pipeline/mesh_visualize.py).
 
-#### Phase 5: Cost Map Computation
-- **Input**: Heightmap
-- **Process**: Calculate traversal cost based on:
-  - Elevation penalty (×0.5 weight)
-  - Slope penalty (×2.0 weight - steep slopes are expensive)
-  - Water detection (elevation < 0.2 = impassable)
-- **Output**: Normalized cost map (0=easy, 1=extreme)
-- **Module**: `pipeline/cost_map.py`
+- A* Pathfinder (Optimal Path)
+  - Runs A* search over the cost map to find an efficient route between start and goal positions.
+  - Computes path statistics such as length, elevation gain/loss, and total cost.
+  - Implemented in [pipeline/planner.py](pipeline/planner.py).
 
-#### Phase 6: Path Planning
-- **Input**: Cost map + start/goal coordinates
-- **Process**: A* pathfinding with diagonal movement
-- **Output**: Optimal path waypoints + statistics
-- **Module**: `pipeline/planner.py`
-- **Features**: 
-  - Cost-aware routing
-  - Obstacle avoidance
-  - Elevation change tracking
-
-#### Phase 7: Visualization
-- **Input**: Mesh + (optional) path
-- **Process**: GPU-accelerated rendering with physically-based materials
-- **Output**: Interactive 3D window OR static PNG
-- **Module**: `pipeline/advanced_terrain_renderer.py`
-- **Renderer**: PyVista + VTK (OpenGL backend)
-- **GPU**: NVIDIA GPU support with automatic detection
+- Interactive Viewer (GPU) and Path Overlay
+  - Renders the 3D mesh with optional mission path overlay using a GPU-accelerated PyVista window.
+  - Provides real-time interaction (orbit, zoom, pan) and static image exports.
+  - Implemented in [pipeline/advanced_terrain_renderer.py](pipeline/advanced_terrain_renderer.py) with a Matplotlib fallback in [pipeline/matplotlib_viewer.py](pipeline/matplotlib_viewer.py).
 
 ---
 
-## 💻 Usage Examples
+## Output Artefacts
 
-### Example 1: Mountain Terrain with 3D Viewer
-```bash
-python pipeline_demo.py --prompt "rocky mountains with snow peaks" --interactive-3d --no-remaster
-```
-**Output**:
-- `heightmap.png` - 2D elevation map
-- `mesh.vtk` - 3D mesh export
-- `visualization_3d_PHOTOREALISTIC.png` - Static render
-- Interactive 3D window with mouse controls
-
-### Example 2: Desert with Mission Planning
-```bash
-python pipeline_demo.py --prompt "sandy desert dunes" --simulate-path --no-remaster
-```
-**Output**:
-- All terrain files from Example 1
-- `cost_map.png` - Traversal cost visualization
-- `mission_path_overlay.png` - Optimal path on terrain
-- Path statistics (waypoints, cost, elevation changes)
-
-### Example 3: Custom Seed for Reproducibility
-```bash
-python pipeline_demo.py --prompt "volcanic crater" --seed 12345 --no-remaster
-```
-**Output**: Same terrain every time with seed 12345
-
----
-
-## 🎮 Interactive Controls
-
-When using `--interactive-3d`, the 3D viewer supports:
-
-- **Mouse Drag**: Rotate view
-- **Scroll Wheel**: Zoom in/out
-- **Right-Click + Drag**: Pan camera
-- **'R' Key**: Reset camera
-- **'Q' or ESC**: Quit viewer
-
----
-
-## 📁 Output Structure
+Each run writes to a timestamped directory under `Output/`:
 
 ```
 Output/
 └── session_<timestamp>/
-    ├── heightmap.png                    # 2D elevation map
-    ├── enhanced_terrain.png             # Colored terrain (if remastered)
-    ├── mesh.vtk                         # 3D mesh (VTK format)
-    ├── visualization_3d.png             # Static 3D render
-    ├── visualization_3d_PHOTOREALISTIC.png  # High-quality render
-    ├── cost_map.png                     # Traversal cost visualization
-    ├── mission_path_overlay.png         # Path on terrain
-    └── metadata.json                    # Generation parameters
+    ├── heightmap.png                 # 2D elevation map
+    ├── enhanced_terrain.png          # Colorized terrain (if remastered)
+    ├── mesh.vtk                      # 3D mesh (VTK format)
+    ├── visualization_3d.png          # Static 3D render
+    ├── visualization_3d_PHOTOREALISTIC.png
+    ├── cost_map.png                  # Traversal cost visualization
+    ├── mission_path_overlay.png      # Optimal path on terrain
+    └── metadata.json                 # Generation parameters and settings
 ```
 
 ---
 
-## 🧪 Testing
+## Testing
 
-Run the test suite to verify functionality:
+Run the automated test suite:
 
 ```bash
 # Run all tests
 python -m pytest tests/ -v
 
-# Run specific test modules
+# Run specific modules
 python -m pytest tests/test_prompt_parameters.py -v
 python -m pytest tests/test_cost_map.py -v
 python -m pytest tests/test_planner.py -v
 
-# Run with coverage
+# With coverage
 python -m pytest tests/ --cov=pipeline --cov-report=html
 ```
 
-### Test Coverage
-
-- **test_prompt_parameters.py**: Prompt parsing, parameter extraction, terrain generation
-- **test_cost_map.py**: Cost calculation, biome modifiers, water/cliff detection
-- **test_planner.py**: A* pathfinding, obstacle avoidance, path statistics
+Tests cover prompt parsing, terrain generation, cost-map behaviour, and pathfinding edge cases.
 
 ---
 
-## ⚙️ Configuration
+## Acknowledgements
 
-### Terrain Parameters
-
-Controlled by prompt keywords:
-
-| Terrain Type | Octaves | Scale | Persistence | Features |
-|-------------|---------|-------|-------------|----------|
-| Mountains   | 8       | 120   | 0.5         | High detail, sharp peaks |
-| Desert      | 3       | 100   | 0.5         | Smooth dunes, low detail |
-| Hills       | 4       | 100   | 0.4         | Rolling terrain |
-| Canyon      | 6       | 110   | 0.6         | Layered features |
-| Forest      | 6       | 100   | 0.5         | Mixed elevation |
-
-### Material Properties
-
-Terrain-specific physically-based rendering:
-
-- **Snow/Ice**: High ambient (0.4), subtle specular (0.05), matte finish
-- **Desert**: Warm tones, minimal specular (0.02), granular appearance
-- **Rocky**: Mixed reflectivity (0.03), earthy colors
-- **Forest**: Very matte (0.0 specular), organic texture
-
----
-
-## 📊 Phase Checklist
-
-Development phases and completion status:
-
-- [x] **Phase 1**: Prompt parsing and parameter extraction
-- [x] **Phase 2**: Perlin noise terrain generation
-- [x] **Phase 3**: Realistic texture mapping (slope-based)
-- [x] **Phase 4**: 3D mesh generation and VTK export
-- [x] **Phase 5**: Cost map computation with biome modifiers
-- [x] **Phase 6**: A* pathfinding with diagonal movement
-- [x] **Phase 7**: GPU-accelerated interactive visualization
-- [x] **Phase 8**: Mission planning with path overlay
-- [x] **Phase 9**: Unit testing and documentation
-- [x] **Phase 10**: Performance optimization (Perlin noise)
-
----
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-**Black Screen in Interactive Viewer**:
-- Solution: Fixed - GPU driver issue resolved with proper event loop handling
-- Ensure NVIDIA GPU drivers are up to date
-
-**Slow Terrain Generation**:
-- Use `--no-remaster` flag to skip SD ControlNet remastering
-- Reduce octaves for faster generation (lower detail)
-
-**Import Errors**:
-- Ensure virtual environment is activated
-- Reinstall: `pip install -r requirements_stable.txt`
-
----
-
-## 📚 Additional Documentation
-
-- **PIPELINE_README.md**: Detailed pipeline architecture
-- **QUICKSTART.md**: Step-by-step beginner guide
-- **API Documentation**: See inline docstrings in modules
-
----
-
-## 🙏 Acknowledgments
-
-- **PyVista**: 3D visualization library
-- **noise**: Perlin/Simplex noise generation
-- **NumPy**: Numerical computing
-- **Matplotlib**: 2D plotting and visualization
-
----
-
-**Made with ❤️ for terrain enthusiasts and mission planners**
+This project builds on the open-source ecosystems around PyVista, VTK, NumPy, Matplotlib, and the `noise` library for procedural generation.
