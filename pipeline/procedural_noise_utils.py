@@ -3,11 +3,20 @@ Procedural Noise Utilities for Terrain Generation
 Implements fractal Brownian motion (fBM) and hybrid terrain generation.
 """
 
+import os
 import numpy as np
 from typing import Tuple, Dict, Any, Optional
 import logging
 from dataclasses import dataclass
 import noise  # Perlin noise library
+
+# Macro-to-micro terrain feature flag.
+# When False, the original fBM-only pipeline is used without any macro structure
+# or domain warping. When True, a low-frequency macro heightfield and coordinate
+# warping are applied before high-frequency detail is added.
+ENABLE_MACRO_TERRAIN: bool = True
+
+from pipeline import macro_terrain
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +39,10 @@ class NoiseParams:
 
 
 def fbm(shape: Tuple[int, int], scale: float = 100.0, octaves: int = 6, 
-        persistence: float = 0.5, lacunarity: float = 2.0, 
-        seed: Optional[int] = None) -> np.ndarray:
+    persistence: float = 0.5, lacunarity: float = 2.0, 
+    seed: Optional[int] = None,
+    warp_dx: Optional[np.ndarray] = None,
+    warp_dy: Optional[np.ndarray] = None) -> np.ndarray:
     """
     Generate fractal Brownian motion (fBM) noise using real Perlin noise.
     
@@ -57,11 +68,20 @@ def fbm(shape: Tuple[int, int], scale: float = 100.0, octaves: int = 6,
     # Generate coordinates scaled by frequency
     frequency_val = 1.0 / scale
     
-    # Use pnoise2's built-in octaves for faster generation
+    # Use pnoise2's built-in octaves for faster generation.
+    # If warp_dx/warp_dy are provided, they are interpreted as coordinate offsets
+    # in index space (macro-scale domain warping) before converting to noise space.
     for i in range(height):
         for j in range(width):
-            x = j * frequency_val
-            y = i * frequency_val
+            if warp_dx is not None and warp_dy is not None:
+                offset_x = warp_dx[i, j]
+                offset_y = warp_dy[i, j]
+            else:
+                offset_x = 0.0
+                offset_y = 0.0
+
+            x = (j + offset_x) * frequency_val
+            y = (i + offset_y) * frequency_val
             
             # Let pnoise2 handle all octaves internally (much faster)
             result[i, j] = noise.pnoise2(
@@ -79,7 +99,9 @@ def fbm(shape: Tuple[int, int], scale: float = 100.0, octaves: int = 6,
 
 
 def generate_river_pattern(shape: Tuple[int, int], frequency: float = 0.05, 
-                          strength: float = 0.3, seed: Optional[int] = None) -> np.ndarray:
+                          strength: float = 0.3, seed: Optional[int] = None,
+                          warp_dx: Optional[np.ndarray] = None,
+                          warp_dy: Optional[np.ndarray] = None) -> np.ndarray:
     """
     Generate river-like patterns using Perlin noise with directional bias.
     
@@ -97,11 +119,18 @@ def generate_river_pattern(shape: Tuple[int, int], frequency: float = 0.05,
     
     rivers = np.zeros((height, width), dtype=np.float32)
     
-    # Generate river patterns with directional flow
+    # Generate river patterns with directional flow.
     for i in range(height):
         for j in range(width):
-            x = j * frequency
-            y = i * frequency
+            if warp_dx is not None and warp_dy is not None:
+                offset_x = warp_dx[i, j]
+                offset_y = warp_dy[i, j]
+            else:
+                offset_x = 0.0
+                offset_y = 0.0
+
+            x = (j + offset_x) * frequency
+            y = (i + offset_y) * frequency
             
             # Sample multiple noise layers for river-like features
             river_value = (
@@ -123,7 +152,8 @@ def generate_river_pattern(shape: Tuple[int, int], frequency: float = 0.05,
 
 
 def generate_procedural_heightmap(shape: Tuple[int, int], 
-                                params: Optional[NoiseParams] = None) -> np.ndarray:
+                                params: Optional[NoiseParams] = None,
+                                debug_dir: Optional[str] = None) -> np.ndarray:
     """
     Generate procedural heightmap using fBM and hybrid terrain features.
     
@@ -136,9 +166,86 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
     """
     if params is None:
         params = NoiseParams()
-    
+
+    # New macro-to-micro pipeline, guarded by a feature flag so the
+    # previous behaviour is preserved when ENABLE_MACRO_TERRAIN is False.
+    if ENABLE_MACRO_TERRAIN:
+        logger.info(f"Generating procedural heightmap (macro + micro): shape={shape}")
+
+        # 1) Macro stage: low-frequency continental structure (no erosion here).
+        #    This returns a normalized macro heightfield plus warp fields that
+        #    are used to domain-warp subsequent high-frequency noise.
+        macro_height, warp_dx, warp_dy = macro_terrain.generate_macro_terrain(
+            shape=shape,
+            params=params,
+            debug_dir=debug_dir,
+        )
+
+        # 2) Micro stage: high-frequency detail sampled on the warped domain.
+        logger.debug("Generating mountain features (domain-warped)...")
+        mountains = fbm(
+            shape=shape,
+            scale=params.scale,
+            octaves=params.octaves,
+            persistence=params.persistence,
+            lacunarity=params.lacunarity,
+            seed=params.seed,
+            warp_dx=warp_dx,
+            warp_dy=warp_dy,
+        )
+
+        logger.debug("Generating valley features (domain-warped)...")
+        valleys = fbm(
+            shape=shape,
+            scale=params.scale * 2.0,  # Larger scale for smoother basins
+            octaves=max(1, params.octaves - 2),
+            persistence=params.persistence * 0.8,
+            lacunarity=params.lacunarity,
+            seed=params.seed + 100 if params.seed else None,
+            warp_dx=warp_dx,
+            warp_dy=warp_dy,
+        )
+
+        logger.debug("Generating river patterns (domain-warped)...")
+        rivers = generate_river_pattern(
+            shape=shape,
+            frequency=params.river_frequency,
+            strength=params.river_strength,
+            seed=params.seed,
+            warp_dx=warp_dx,
+            warp_dy=warp_dy,
+        )
+
+        # Mix macro and micro features. Macro_height provides broad elevation
+        # zones; micro detail adds local structure at reduced amplitude.
+        logger.debug("Combining macro and micro terrain features...")
+        micro_height = (
+            mountains * params.mountain_weight
+            + valleys * params.valley_weight
+            - rivers
+        )
+
+        micro_scale = 0.35  # Assumption: keep macro shapes dominant.
+        combined = macro_height + micro_scale * micro_height
+
+        # Normalize combined heightfield to [0, 1].
+        height_min = combined.min()
+        height_max = combined.max()
+
+        if height_max > height_min:
+            combined = (combined - height_min) / (height_max - height_min)
+        else:
+            combined = np.ones_like(combined) * 0.5
+
+        logger.info(
+            f"✓ Procedural heightmap (macro + micro) generated: "
+            f"range=[{combined.min():.3f}, {combined.max():.3f}]"
+        )
+        return combined.astype(np.float32)
+
+    # Legacy fBM-only pipeline (existing behaviour when macro terrain is disabled).
     logger.info(f"Generating procedural heightmap: shape={shape}")
-    
+
     # Generate different terrain features using fBM
     logger.debug("Generating mountain features...")
     mountains = fbm(
@@ -147,9 +254,9 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
         octaves=params.octaves,
         persistence=params.persistence,
         lacunarity=params.lacunarity,
-        seed=params.seed
+        seed=params.seed,
     )
-    
+
     logger.debug("Generating valley features...")
     valleys = fbm(
         shape=shape,
@@ -157,34 +264,34 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
         octaves=max(1, params.octaves - 2),  # Fewer octaves for smoother valleys
         persistence=params.persistence * 0.8,
         lacunarity=params.lacunarity,
-        seed=params.seed + 100 if params.seed else None  # Offset seed
+        seed=params.seed + 100 if params.seed else None,  # Offset seed
     )
-    
+
     logger.debug("Generating river patterns...")
     rivers = generate_river_pattern(
         shape=shape,
         frequency=params.river_frequency,
         strength=params.river_strength,
-        seed=params.seed
+        seed=params.seed,
     )
-    
+
     # Mix terrain features
     logger.debug("Mixing terrain features...")
     height = (
-        mountains * params.mountain_weight + 
-        valleys * params.valley_weight - 
+        mountains * params.mountain_weight +
+        valleys * params.valley_weight -
         rivers
     )
-    
+
     # Normalize to [0, 1] range
     height_min = height.min()
     height_max = height.max()
-    
+
     if height_max > height_min:
         height = (height - height_min) / (height_max - height_min)
     else:
         height = np.ones_like(height) * 0.5  # Fallback to flat terrain
-    
+
     logger.info(f"✓ Procedural heightmap generated: range=[{height.min():.3f}, {height.max():.3f}]")
     return height.astype(np.float32)
 
