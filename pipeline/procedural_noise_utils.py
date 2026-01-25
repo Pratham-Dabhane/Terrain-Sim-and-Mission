@@ -18,6 +18,7 @@ ENABLE_MACRO_TERRAIN: bool = True
 
 from pipeline import macro_terrain
 from pipeline import erosion
+from pipeline import terrain_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +248,13 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
         # macro terrain logic remains unchanged. Erosion respects its own
         # feature flags and returns the input unchanged when disabled.
         eroded = erosion.apply_erosion(combined.astype(np.float32), debug_dir=debug_dir)
+        
+        # Optional terrain analysis stage (Phase 3), computes biome masks.
+        # Returns analysis results as a dict (not modifying the heightmap itself).
+        if terrain_analysis.ENABLE_BIOMES and debug_dir is not None:
+            analysis = terrain_analysis.analyze_terrain(eroded, debug_dir=debug_dir)
+            logger.info(f"✓ Terrain analysis complete: {len(analysis['biome_masks'])} biome masks generated")
+        
         return eroded.astype(np.float32)
 
     # Legacy fBM-only pipeline (existing behaviour when macro terrain is disabled).
@@ -298,6 +306,13 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
     else:
         height = np.ones_like(height) * 0.5  # Fallback to flat terrain
 
+    # Optional terrain analysis stage (Phase 3), computes biome masks.
+    # Returns analysis results as a dict (not modifying the heightmap itself).
+    if terrain_analysis.ENABLE_BIOMES and debug_dir is not None:
+        analysis = terrain_analysis.analyze_terrain(eroded, debug_dir=debug_dir)
+        logger.info(f"✓ Terrain analysis complete: {len(analysis['biome_masks'])} biome masks generated")
+    
+    
     logger.info(f"✓ Procedural heightmap generated: range=[{height.min():.3f}, {height.max():.3f}]")
 
     # Apply optional erosion even in the legacy path so that callers get

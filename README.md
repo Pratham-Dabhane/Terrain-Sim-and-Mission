@@ -8,12 +8,16 @@ The project combines procedural terrain synthesis, GPU-accelerated 3D rendering,
 
 ## Features
 
+- **Multi-stage terrain pipeline**:
+  - **Phase 1**: Macro-to-micro terrain generation with continental-scale structure and domain warping
+  - **Phase 2**: Physically-motivated erosion (hydraulic + thermal) for realistic weathering
+  - **Phase 3**: Terrain analysis with automatic biome classification (snow, rock, scree, forest, grassland, wetlands, water)
 - Text-to-terrain generation from natural language prompts using procedural noise and prompt-derived parameters
 - GPU-accelerated 3D terrain rendering with PyVista/VTK (interactive and offline)
-- Cost-aware mission planning via A* on terrain cost maps (elevation, slope, water)
+- Cost-aware mission planning via A* on terrain cost maps (elevation, slope, water, biomes)
 - Automatic cost-map and path statistics (difficulty, elevation gain/loss, total cost)
 - Image and mesh exports for further analysis (`.png`, `.vtk`)
-- Comprehensive automated tests for parsing, terrain generation, cost maps, and pathfinding
+- Comprehensive automated tests (64 tests) for all pipeline stages
 
 ---
 
@@ -53,6 +57,9 @@ python pipeline_demo.py --prompt "snowy mountain peaks" --interactive-3d
 # Generate terrain and compute an optimal mission path
 python pipeline_demo.py --prompt "desert dunes" --simulate-path
 
+# Visualize biome classification
+python biome_visualization_demo.py
+
 # Faster run without image remastering
 python pipeline_demo.py --prompt "rolling hills" --no-remaster
 ```
@@ -62,20 +69,20 @@ python pipeline_demo.py --prompt "rolling hills" --no-remaster
 ## Architecture Overview
 
 High-level flow from text prompt to mission plan:
-
-```
-┌──────────────┐     ┌──────────────────┐     ┌───────────────┐
-│ Text Prompt  │ --> │ Terrain Generator│ --> │ Cost Map      │
-│ "mountains"  │     │ (Perlin Noise)   │     │ (Elevation +  │
-└──────────────┘     └──────────────────┘     │  Slope)       │
-                              │               └───────────────┘
-                              ↓                        │
-                     ┌──────────────────┐              ↓
-                     │ 3D Mesh          │     ┌───────────────┐
-                     │ (PyVista)        │     │ A* Pathfinder │
-                     └──────────────────┘     │ (Optimal Path)│
-                              │               └───────────────┘
-                              ↓                        │
+Pipeline │ --> │ Biome Analysis│
+│ "mountains"  │     │ Macro + Erosion  │     │ 7 Biome Masks │
+└──────────────┘     └──────────────────┘     └───────────────┘
+                              │                        │
+                              ↓                        ↓
+                     ┌──────────────────┐     ┌───────────────┐
+                     │ 3D Mesh          │     │ Cost Map      │
+                     │ (PyVista)        │     │ (Multi-factor)│
+                     └──────────────────┘     └───────────────┘
+                              │                        │
+                              ↓                        ↓
+                     ┌──────────────────┐     ┌───────────────┐
+                     │ Interactive      │     │ A* Pathfinder │
+                     │ Viewer (GPU)     │     │ (Optimal Path)
                      ┌──────────────────┐              ↓
                      │ Interactive      │     ┌───────────────┐
                      │ Viewer (GPU)     │     │ Path Overlay  │
@@ -88,13 +95,19 @@ Component breakdown:
   - Free-form user description of the terrain (for example, "snowy mountain peaks" or "sandy desert dunes").
   - Parsed by the prompt parser in [pipeline/prompt_parser.py](pipeline/prompt_parser.py) into noise and style parameters.
 
-- Terrain Generator (Perlin Noise)
-  - Uses multi-octave Perlin-based fractional Brownian motion to synthesize a normalized heightmap.
-  - Implemented in [pipeline/procedural_noise_utils.py](pipeline/procedural_noise_utils.py).
+- Terrain Pipeline (Macro + Erosion)
+  - **Phase 1**: Macro-scale heightfield with continental plates and domain warping ([pipeline/macro_terrain.py](pipeline/macro_terrain.py))
+  - **Phase 2**: Hydraulic and thermal erosion for realistic weathering ([pipeline/erosion.py](pipeline/erosion.py))
+  - **Core**: Multi-octave Perlin-based fractional Brownian motion ([pipeline/procedural_noise_utils.py](pipeline/procedural_noise_utils.py))
+  
+- Biome Analysis
+  - **Phase 3**: Computes terrain attributes (slope, curvature, aspect, distance-to-water)
+  - Generates smooth biome masks for snow, rock, scree, grassland, forest, wetlands, and water
+  - Implemented in [pipeline/terrain_analysis.py](pipeline/terrain_analysis.py)
 
-- Cost Map (Elevation + Slope)
-  - Converts the heightmap into a traversal cost grid by combining elevation, slope, and water thresholds.
-  - Implemented in [pipeline/cost_map.py](pipeline/cost_map.py).
+- Cost Map (Multi-factor)
+  - Converts the heightmap into a traversal cost grid by combining elevation, slope, water, and biome-specific modifiers
+  - Implemented in [pipeline/cost_map.py](pipeline/cost_map.py)
 
 - 3D Mesh (PyVista)
   - Lifts the heightmap into 3D, applies realistic terrain colouring, and builds a renderable mesh.
@@ -113,27 +126,38 @@ Component breakdown:
 ---
 
 ## Output Artefacts
-
-Each run writes to a timestamped directory under `Output/`:
-
-```
-Output/
-└── session_<timestamp>/
-    ├── heightmap.png                 # 2D elevation map
-    ├── enhanced_terrain.png          # Colorized terrain (if remastered)
-    ├── mesh.vtk                      # 3D mesh (VTK format)
-    ├── visualization_3d.png          # Static 3D render
+     # 2D elevation map
+    ├── enhanced_terrain.png               # Colorized terrain (if remastered)
+    ├── mesh.vtk                           # 3D mesh (VTK format)
+    ├── visualization_3d.png               # Static 3D render
     ├── visualization_3d_PHOTOREALISTIC.png
-    ├── cost_map.png                  # Traversal cost visualization
-    ├── mission_path_overlay.png      # Optimal path on terrain
-    └── metadata.json                 # Generation parameters and settings
+    ├── cost_map.png                       # Traversal cost visualization
+    ├── mission_path_overlay.png           # Optimal path on terrain
+    ├── metadata.json                      # Generation parameters and settings
+    └── debug/                             # Debug outputs (when enabled)
+        ├── macro_heightfield.png          # Phase 1: Macro terrain structure
+        ├── domain_warp_magnitude.png      # Phase 1: Domain warping
+        ├── erosion_water.png              # Phase 2: Water accumulation
+        ├── erosion_sediment.png           # Phase 2: Sediment distribution
+        ├── erosion_delta.png              # Phase 2: Erosion/deposition
+        ├── terrain_attributes.png         # Phase 3: Slope, curvature, etc.
+        ├── biome_masks.png                # Phase 3: Individual biome masks
+        └── dominant_biome.png             # Phase 3: Biome classification
+    ├── mesh.vt (64 tests total)
+python -m pytest tests/ -v
+
+# Run specific modules
+python -m pytest tests/test_prompt_parameters.py -v
+python -m pytest tests/test_cost_map.py -v
+python -m pytest tests/test_planner.py -v
+python -m pytest tests/test_erosion.py -v
+python -m pytest tests/test_terrain_analysis.py -v
+
+# With coverage
+python -m pytest tests/ --cov=pipeline --cov-report=html
 ```
 
----
-
-## Testing
-
-Run the automated test suite:
+Tests cover all pipeline stages: prompt parsing, macro terrain, erosion stability, biome classification, cost-map behaviour, and pathfinding
 
 ```bash
 # Run all tests
