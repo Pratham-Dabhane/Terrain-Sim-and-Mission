@@ -37,7 +37,7 @@ class PipelineConfig:
     # =============================================================================
     
     # Heightmap generation settings
-    base_heightmap_size: Tuple[int, int] = (256, 256)    # Base heightmap resolution
+    base_heightmap_size: Tuple[int, int] = (512, 512)    # Base heightmap resolution (increased for smoother 3D)
     output_size: Tuple[int, int] = (512, 512)            # Final output resolution
     
     # =============================================================================

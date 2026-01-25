@@ -87,8 +87,14 @@ class TerrainMeshGenerator:
         y = np.linspace(0, height * y_scale, height)
         X, Y = np.meshgrid(x, y)
         
-        # Scale elevation
-        Z = heightmap * z_scale * self.scale_factor
+        # Adaptive vertical scaling: if z_scale is default (1.0), use adaptive scaling
+        if z_scale == 1.0 and x_scale == 1.0 and y_scale == 1.0:
+            base_size = max(height, width)
+            vertical_exaggeration = 1.5
+            Z = heightmap * base_size * vertical_exaggeration * self.scale_factor
+        else:
+            # User provided custom scales, respect them
+            Z = heightmap * z_scale * self.scale_factor
         
         # Create structured grid
         grid = pv.StructuredGrid(X, Y, Z)
@@ -175,7 +181,14 @@ class TerrainMeshGenerator:
         x = np.linspace(0, width * x_scale, width)
         y = np.linspace(0, height * y_scale, height)
         X, Y = np.meshgrid(x, y)
-        Z = heightmap * z_scale * self.scale_factor
+        
+        # Adaptive vertical scaling for consistent visualization
+        if z_scale == 1.0 and x_scale == 1.0 and y_scale == 1.0:
+            base_size = max(height, width)
+            vertical_exaggeration = 1.5
+            Z = heightmap * base_size * vertical_exaggeration * self.scale_factor
+        else:
+            Z = heightmap * z_scale * self.scale_factor
         
         # Flatten to point cloud
         points = np.column_stack([

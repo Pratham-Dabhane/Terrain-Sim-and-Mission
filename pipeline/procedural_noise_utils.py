@@ -379,7 +379,7 @@ def generate_terrain_variants(shape: Tuple[int, int], seed: Optional[int] = None
 # 🎯 CONVENIENCE FUNCTIONS
 # =============================================================================
 
-def quick_heightmap(shape: Tuple[int, int] = (256, 256), 
+def quick_heightmap(shape: Tuple[int, int] = (512, 512), 
                    terrain_type: str = 'mixed', 
                    seed: Optional[int] = None) -> np.ndarray:
     """

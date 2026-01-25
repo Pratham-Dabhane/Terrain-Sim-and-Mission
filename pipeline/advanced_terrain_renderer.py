@@ -112,7 +112,7 @@ class AdvancedTerrainRenderer:
             raise
     
     def _create_enhanced_mesh(self, heightmap):
-        """Create enhanced mesh with dramatic scaling"""
+        """Create enhanced mesh with adaptive dramatic scaling"""
         height, width = heightmap.shape
         
         # Create coordinate grids
@@ -120,8 +120,11 @@ class AdvancedTerrainRenderer:
         y = np.arange(height, dtype=np.float32)
         X, Y = np.meshgrid(x, y)
         
-        # Enhanced height scaling for dramatic terrain (increased from 20 to 60)
-        Z = heightmap * 60.0
+        # Adaptive vertical scaling: scale Z relative to terrain dimensions
+        # This ensures dramatic relief regardless of resolution
+        base_size = max(height, width)
+        vertical_exaggeration = 1.5  # 1.5x for dramatic but realistic mountains
+        Z = heightmap * base_size * vertical_exaggeration
         
         # Create points array
         points = np.column_stack([
@@ -145,6 +148,14 @@ class AdvancedTerrainRenderer:
         
         # Create PolyData mesh
         mesh = pv.PolyData(points, faces)
+        
+        # Smooth the mesh to reduce zigzag artifacts
+        # Subdivision adds intermediate vertices for higher resolution
+        mesh = mesh.subdivide(nsub=1, subfilter='butterfly')  # 4x more triangles
+        # Laplacian smoothing eliminates sharp edges while preserving features
+        mesh = mesh.smooth(n_iter=15, relaxation_factor=0.1)
+        
+        logger.info(f"Mesh smoothed: {mesh.n_points} points after subdivision")
         
         return mesh
     
