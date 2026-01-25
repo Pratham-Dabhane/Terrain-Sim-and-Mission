@@ -17,6 +17,7 @@ import noise  # Perlin noise library
 ENABLE_MACRO_TERRAIN: bool = True
 
 from pipeline import macro_terrain
+from pipeline import erosion
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +242,12 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
             f"✓ Procedural heightmap (macro + micro) generated: "
             f"range=[{combined.min():.3f}, {combined.max():.3f}]"
         )
-        return combined.astype(np.float32)
+
+        # Optional erosion stage (Phase 2), applied as a post-process so that
+        # macro terrain logic remains unchanged. Erosion respects its own
+        # feature flags and returns the input unchanged when disabled.
+        eroded = erosion.apply_erosion(combined.astype(np.float32), debug_dir=debug_dir)
+        return eroded.astype(np.float32)
 
     # Legacy fBM-only pipeline (existing behaviour when macro terrain is disabled).
     logger.info(f"Generating procedural heightmap: shape={shape}")
@@ -293,7 +299,12 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
         height = np.ones_like(height) * 0.5  # Fallback to flat terrain
 
     logger.info(f"✓ Procedural heightmap generated: range=[{height.min():.3f}, {height.max():.3f}]")
-    return height.astype(np.float32)
+
+    # Apply optional erosion even in the legacy path so that callers get
+    # consistent behaviour with respect to the erosion flags, independent of
+    # the macro terrain feature flag.
+    eroded = erosion.apply_erosion(height.astype(np.float32), debug_dir=debug_dir)
+    return eroded.astype(np.float32)
 
 
 def generate_terrain_variants(shape: Tuple[int, int], seed: Optional[int] = None) -> Dict[str, np.ndarray]:
