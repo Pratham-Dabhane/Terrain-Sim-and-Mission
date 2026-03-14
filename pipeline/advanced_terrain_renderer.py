@@ -123,7 +123,7 @@ class AdvancedTerrainRenderer:
         # Adaptive vertical scaling: scale Z relative to terrain dimensions
         # This ensures dramatic relief regardless of resolution
         base_size = max(height, width)
-        vertical_exaggeration = 1.5  # 1.5x for dramatic but realistic mountains
+        vertical_exaggeration = 0.6  # Reduced to avoid over-exaggerated, crumpled relief
         Z = heightmap * base_size * vertical_exaggeration
         
         # Create points array
@@ -153,7 +153,7 @@ class AdvancedTerrainRenderer:
         # Subdivision adds intermediate vertices for higher resolution
         mesh = mesh.subdivide(nsub=1, subfilter='butterfly')  # 4x more triangles
         # Laplacian smoothing eliminates sharp edges while preserving features
-        mesh = mesh.smooth(n_iter=15, relaxation_factor=0.1)
+        mesh = mesh.smooth(n_iter=25, relaxation_factor=0.1)
         
         logger.info(f"Mesh smoothed: {mesh.n_points} points after subdivision")
         

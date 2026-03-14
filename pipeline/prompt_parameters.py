@@ -56,7 +56,7 @@ class TerrainParameters:
     mesh_z_scale: float = 20.0          # Z-axis scaling for 3D mesh
     
     # Resolution
-    heightmap_size: Tuple[int, int] = (256, 256)  # Generation resolution
+    heightmap_size: Tuple[int, int] = (512, 512)  # Generation resolution
     
     # Deterministic seed
     seed: int = 42                      # Random seed for reproducibility
@@ -146,9 +146,9 @@ def extract_intensity_modifiers(prompt: str) -> Dict[str, float]:
     
     # Resolution hints
     if any(word in prompt_lower for word in ['high-resolution', 'high-res', 'detailed', 'hires']):
-        modifiers['heightmap_size'] = (512, 512)
+        modifiers['heightmap_size'] = (1024, 1024)
     elif any(word in prompt_lower for word in ['low-resolution', 'low-res', 'fast', 'preview']):
-        modifiers['heightmap_size'] = (128, 128)
+        modifiers['heightmap_size'] = (512, 512)
     
     return modifiers
 

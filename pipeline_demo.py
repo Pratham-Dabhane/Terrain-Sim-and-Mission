@@ -330,7 +330,7 @@ class TerrainPipelineDemo:
             enhanced = enhanced.convert('RGB').resize(output_size)
             return enhanced, heightmap
     
-    def create_3d_mesh(self, heightmap: np.ndarray, scale_factor: float = 20.0):
+    def create_3d_mesh(self, heightmap: np.ndarray, scale_factor: float = 8.0):
         """
         Generate 3D mesh from heightmap.
         

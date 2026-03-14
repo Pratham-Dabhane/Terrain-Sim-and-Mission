@@ -12,12 +12,13 @@ The project combines procedural terrain synthesis, GPU-accelerated 3D rendering,
   - **Phase 1**: Macro-to-micro terrain generation with continental-scale structure and domain warping
   - **Phase 2**: Physically-motivated erosion (hydraulic + thermal) for realistic weathering
   - **Phase 3**: Terrain analysis with automatic biome classification (snow, rock, scree, forest, grassland, wetlands, water)
+  - **Phase 4**: DEM-based calibration to ground procedural parameters in real-world terrain statistics
 - Text-to-terrain generation from natural language prompts using procedural noise and prompt-derived parameters
 - GPU-accelerated 3D terrain rendering with PyVista/VTK (interactive and offline)
 - Cost-aware mission planning via A* on terrain cost maps (elevation, slope, water, biomes)
 - Automatic cost-map and path statistics (difficulty, elevation gain/loss, total cost)
 - Image and mesh exports for further analysis (`.png`, `.vtk`)
-- Comprehensive automated tests (64 tests) for all pipeline stages
+- Comprehensive automated tests (80 tests) for all pipeline stages
 
 ---
 
@@ -59,6 +60,9 @@ python pipeline_demo.py --prompt "desert dunes" --simulate-path
 
 # Visualize biome classification
 python biome_visualization_demo.py
+
+# Calibrate to real-world DEM statistics
+python dem_calibration_demo.py --dem path/to/real_dem.tif
 
 # Faster run without image remastering
 python pipeline_demo.py --prompt "rolling hills" --no-remaster
@@ -105,6 +109,12 @@ Component breakdown:
   - Generates smooth biome masks for snow, rock, scree, grassland, forest, wetlands, and water
   - Implemented in [pipeline/terrain_analysis.py](pipeline/terrain_analysis.py)
 
+- DEM Calibration
+  - **Phase 4**: Loads real-world DEMs (GeoTIFF, PNG, NPY) and computes terrain statistics
+  - Calibrates procedural parameters to match DEM elevation, slope, drainage, and ridge spacing
+  - Non-destructive and optional (procedural generation works independently)
+  - Implemented in [pipeline/dem_analysis.py](pipeline/dem_analysis.py)
+
 - Cost Map (Multi-factor)
   - Converts the heightmap into a traversal cost grid by combining elevation, slope, water, and biome-specific modifiers
   - Implemented in [pipeline/cost_map.py](pipeline/cost_map.py)
@@ -143,7 +153,7 @@ Component breakdown:
         ├── terrain_attributes.png         # Phase 3: Slope, curvature, etc.
         ├── biome_masks.png                # Phase 3: Individual biome masks
         └── dominant_biome.png             # Phase 3: Biome classification
-    ├── mesh.vt (64 tests total)
+# Run all tests (80 tests total)
 python -m pytest tests/ -v
 
 # Run specific modules
@@ -152,12 +162,13 @@ python -m pytest tests/test_cost_map.py -v
 python -m pytest tests/test_planner.py -v
 python -m pytest tests/test_erosion.py -v
 python -m pytest tests/test_terrain_analysis.py -v
+python -m pytest tests/test_dem_analysis.py -v
 
 # With coverage
 python -m pytest tests/ --cov=pipeline --cov-report=html
 ```
 
-Tests cover all pipeline stages: prompt parsing, macro terrain, erosion stability, biome classification, cost-map behaviour, and pathfinding
+Tests cover all pipeline stages: prompt parsing, macro terrain, erosion stability, biome classification, DEM calibration, cost-map behaviour, and pathfinding.
 
 ```bash
 # Run all tests

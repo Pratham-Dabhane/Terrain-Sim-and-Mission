@@ -44,8 +44,8 @@ class ErosionParams:
     """
 
     # Number of global hydraulic / thermal iterations
-    hydraulic_iterations: int = 25
-    thermal_iterations: int = 15
+    hydraulic_iterations: int = 35
+    thermal_iterations: int = 20
 
     # Hydraulic erosion parameters
     rainfall: float = 0.01          # Water added per cell per hydraulic step

@@ -90,7 +90,7 @@ class TerrainMeshGenerator:
         # Adaptive vertical scaling: if z_scale is default (1.0), use adaptive scaling
         if z_scale == 1.0 and x_scale == 1.0 and y_scale == 1.0:
             base_size = max(height, width)
-            vertical_exaggeration = 1.5
+            vertical_exaggeration = 0.6
             Z = heightmap * base_size * vertical_exaggeration * self.scale_factor
         else:
             # User provided custom scales, respect them
@@ -185,7 +185,7 @@ class TerrainMeshGenerator:
         # Adaptive vertical scaling for consistent visualization
         if z_scale == 1.0 and x_scale == 1.0 and y_scale == 1.0:
             base_size = max(height, width)
-            vertical_exaggeration = 1.5
+            vertical_exaggeration = 0.6
             Z = heightmap * base_size * vertical_exaggeration * self.scale_factor
         else:
             Z = heightmap * z_scale * self.scale_factor
@@ -256,7 +256,7 @@ class TerrainMeshGenerator:
         # Apply smoothing if requested
         if self.smoothing and hasattr(mesh, 'smooth'):
             try:
-                mesh = mesh.smooth(n_iter=50, relaxation_factor=0.1)
+                mesh = mesh.smooth(n_iter=70, relaxation_factor=0.1)
             except:
                 logger.warning("Mesh smoothing failed")
         

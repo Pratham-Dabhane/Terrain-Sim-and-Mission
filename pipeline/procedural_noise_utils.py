@@ -306,19 +306,19 @@ def generate_procedural_heightmap(shape: Tuple[int, int],
     else:
         height = np.ones_like(height) * 0.5  # Fallback to flat terrain
 
-    # Optional terrain analysis stage (Phase 3), computes biome masks.
-    # Returns analysis results as a dict (not modifying the heightmap itself).
-    if terrain_analysis.ENABLE_BIOMES and debug_dir is not None:
-        analysis = terrain_analysis.analyze_terrain(eroded, debug_dir=debug_dir)
-        logger.info(f"✓ Terrain analysis complete: {len(analysis['biome_masks'])} biome masks generated")
-    
-    
     logger.info(f"✓ Procedural heightmap generated: range=[{height.min():.3f}, {height.max():.3f}]")
 
     # Apply optional erosion even in the legacy path so that callers get
     # consistent behaviour with respect to the erosion flags, independent of
     # the macro terrain feature flag.
     eroded = erosion.apply_erosion(height.astype(np.float32), debug_dir=debug_dir)
+
+    # Optional terrain analysis stage (Phase 3), computes biome masks.
+    # Returns analysis results as a dict (not modifying the heightmap itself).
+    if terrain_analysis.ENABLE_BIOMES and debug_dir is not None:
+        analysis = terrain_analysis.analyze_terrain(eroded, debug_dir=debug_dir)
+        logger.info(f"✓ Terrain analysis complete: {len(analysis['biome_masks'])} biome masks generated")
+
     return eroded.astype(np.float32)
 
 

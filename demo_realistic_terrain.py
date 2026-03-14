@@ -43,7 +43,7 @@ def run_terrain_demos():
         try:
             # Use deterministic seed based on prompt (different for each due to different prompts)
             # Override seed parameter removed - will use hash-based deterministic seed
-            result = pipeline.run_pipeline(
+            result = pipeline.run_complete_pipeline(
                 prompt=prompt,
                 seed=None,  # Use deterministic seed from prompt
                 enable_remastering=True
