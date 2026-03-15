@@ -4,6 +4,7 @@ Generate terrain using DEM-calibrated parameters from Grand Canyon
 Usage:
     python generate_calibrated_terrain.py
     python generate_calibrated_terrain.py --seed 42
+    python generate_calibrated_terrain.py --seed 2 --size 320 --interactive-3d --mission
 """
 
 import argparse
@@ -16,6 +17,8 @@ from pathlib import Path
 from pipeline.procedural_noise_utils import generate_procedural_heightmap, NoiseParams
 from pipeline.advanced_terrain_renderer import AdvancedTerrainRenderer
 from pipeline.terrain_texture_mapper import colorize_by_elevation_and_slope
+from pipeline.cost_map import cost_map
+from pipeline.planner import find_path, calculate_path_statistics, overlay_path_on_terrain
 
 # CALIBRATED PARAMETERS from Grand Canyon DEM (n36_w113)
 GRAND_CANYON_PARAMS = NoiseParams(
@@ -37,6 +40,7 @@ def main():
     parser.add_argument("--size", type=int, default=512, help="Terrain size (512 or 1024)")
     parser.add_argument("--interactive-3d", action="store_true", help="Launch interactive 3D viewer")
     parser.add_argument("--remaster-top", action="store_true", help="Optional SD/ControlNet remaster for top texture")
+    parser.add_argument("--mission", action="store_true", help="Enable mission planning: click start/end on heightmap")
     parser.add_argument("--output", type=str, default="Output/calibrated_terrain", help="Output directory")
     args = parser.parse_args()
     
@@ -94,6 +98,96 @@ def main():
     plt.savefig(img_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"✓ Saved visualization: {img_path}")
+    
+    # ══════════════════════════════════════════════════════════════
+    # MISSION PLANNING: interactive start/end selection → A* path
+    # ══════════════════════════════════════════════════════════════
+    mission_path = []  # Will be populated if --mission is used
+    if args.mission:
+        print("\n" + "─"*50)
+        print("MISSION PLANNING")
+        print("─"*50)
+        print("Click START point on the heightmap, then click END point.")
+        print("(Close the window after clicking both points)")
+        
+        # Show heightmap and let user click start and end
+        fig_pick, ax_pick = plt.subplots(figsize=(10, 10))
+        ax_pick.imshow(heightmap, cmap='terrain', interpolation='bilinear')
+        ax_pick.set_title('Click START point, then click END point\n(2 clicks total)', fontsize=14)
+        ax_pick.axis('off')
+        
+        # Blocking call — waits for 2 clicks
+        clicked_points = plt.ginput(2, timeout=120)
+        plt.close(fig_pick)
+        
+        if len(clicked_points) < 2:
+            print("⚠ Less than 2 points selected — skipping mission planning.")
+        else:
+            # ginput returns (x, y) = (col, row)
+            start_col, start_row = int(clicked_points[0][0]), int(clicked_points[0][1])
+            end_col, end_row = int(clicked_points[1][0]), int(clicked_points[1][1])
+            
+            # Clamp to valid range
+            start_row = np.clip(start_row, 0, heightmap.shape[0] - 1)
+            start_col = np.clip(start_col, 0, heightmap.shape[1] - 1)
+            end_row = np.clip(end_row, 0, heightmap.shape[0] - 1)
+            end_col = np.clip(end_col, 0, heightmap.shape[1] - 1)
+            
+            start = (int(start_row), int(start_col))
+            goal = (int(end_row), int(end_col))
+            
+            print(f"  Start: row={start[0]}, col={start[1]}  (elevation={heightmap[start[0], start[1]]:.3f})")
+            print(f"  Goal:  row={goal[0]}, col={goal[1]}  (elevation={heightmap[goal[0], goal[1]]:.3f})")
+            
+            # Generate cost map
+            print("\nComputing cost map...")
+            terrain_params = {
+                'water_level': 0.15,
+                'elevation_scale': 1.0,
+                'roughness': 0.5,
+                'biome_type': 'mountain'
+            }
+            cost_grid = cost_map(heightmap, terrain_params)
+            
+            cost_path = output_dir / "cost_map.png"
+            plt.figure(figsize=(10, 10))
+            plt.imshow(cost_grid, cmap='hot', interpolation='bilinear')
+            plt.colorbar(label='Traversal Cost')
+            plt.title('Cost Map')
+            plt.axis('off')
+            plt.savefig(cost_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            print(f"✓ Saved cost map: {cost_path}")
+            
+            # Run A* pathfinding
+            print("Running A* pathfinding...")
+            mission_path = find_path(cost_grid, start, goal)
+            
+            if not mission_path:
+                print("⚠ No path found between the selected points!")
+            else:
+                # Print path statistics
+                stats = calculate_path_statistics(mission_path, cost_grid, heightmap)
+                print(f"\n{'─'*40}")
+                print(f"  PATH FOUND")
+                print(f"{'─'*40}")
+                print(f"  Waypoints:        {stats['waypoints']}")
+                print(f"  Total cost:       {stats['total_cost']:.2f}")
+                print(f"  Elevation gain:   {stats['elevation_gain']:.4f}")
+                print(f"  Elevation loss:   {stats['elevation_loss']:.4f}")
+                print(f"  Start elevation:  {stats['start_elevation']:.3f}")
+                print(f"  Goal elevation:   {stats['goal_elevation']:.3f}")
+                print(f"  Path efficiency:  {stats['path_efficiency']:.3f}")
+                print(f"{'─'*40}")
+                
+                # Save 2D path overlay
+                path_2d_img = output_dir / "mission_path_2d.png"
+                overlay_path_on_terrain(
+                    heightmap, mission_path,
+                    output_path=str(path_2d_img),
+                    title=f"Mission Path (seed={args.seed})"
+                )
+                print(f"✓ Saved 2D path overlay: {path_2d_img}")
     
     # Generate 3D mesh and save as image
     if args.interactive_3d:
@@ -213,7 +307,8 @@ def main():
             heightmap,
             enhanced_texture,
             terrain_prompt=f"Grand Canyon-Calibrated Terrain (seed={args.seed})",
-            output_path=str(render_3d_path)
+            output_path=str(render_3d_path),
+            mission_path=mission_path if mission_path else None
         )
         print(f"✓ Saved 3D render: {render_3d_path}")
 
@@ -222,7 +317,8 @@ def main():
         renderer.create_interactive_photorealistic_visualization(
             heightmap,
             enhanced_texture,
-            terrain_prompt=f"Grand Canyon-Calibrated Terrain (seed={args.seed})"
+            terrain_prompt=f"Grand Canyon-Calibrated Terrain (seed={args.seed})",
+            mission_path=mission_path if mission_path else None
         )
     
     print("\n" + "="*70)

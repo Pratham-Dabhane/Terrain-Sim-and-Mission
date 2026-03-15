@@ -34,7 +34,7 @@ class AdvancedTerrainRenderer:
         logger.info("AdvancedTerrainRenderer initialized with GPU acceleration")
         logger.info("Advanced terrain renderer initialized")
     
-    def create_photorealistic_visualization(self, heightmap, enhanced_texture, terrain_prompt, output_path):
+    def create_photorealistic_visualization(self, heightmap, enhanced_texture, terrain_prompt, output_path, mission_path=None):
         """Create photorealistic 3D terrain"""
         
         logger.info("Creating photorealistic 3D visualization...")
@@ -62,6 +62,10 @@ class AdvancedTerrainRenderer:
             scene_mesh = top_mesh.merge(block_mesh)
             self._set_cinematic_camera(plotter, scene_mesh, heightmap)
             
+            # 5b. Add mission path if provided
+            if mission_path:
+                self._add_path_to_scene(plotter, mission_path, heightmap, top_mesh)
+            
             # 6. Render high-quality image
             plotter.screenshot(output_path, window_size=(1920, 1080), return_img=False)
             plotter.close()
@@ -73,7 +77,7 @@ class AdvancedTerrainRenderer:
             logger.error(f"Failed to create photorealistic visualization: {e}")
             raise
     
-    def create_interactive_photorealistic_visualization(self, heightmap, enhanced_texture, terrain_prompt):
+    def create_interactive_photorealistic_visualization(self, heightmap, enhanced_texture, terrain_prompt, mission_path=None):
         """Create INTERACTIVE photorealistic 3D terrain with rotation, zoom, etc."""
         
         logger.info("Creating INTERACTIVE photorealistic 3D visualization...")
@@ -105,6 +109,11 @@ class AdvancedTerrainRenderer:
             # Camera setup
             scene_mesh = top_mesh.merge(block_mesh)
             self._set_cinematic_camera(plotter, scene_mesh, heightmap)
+            
+            # Add mission path if provided
+            if mission_path:
+                self._add_path_to_scene(plotter, mission_path, heightmap, top_mesh)
+            
             cam = plotter.camera
             logger.info(f"  Camera position: {cam.position}")
             logger.info(f"  Camera focal point: {cam.focal_point}")
@@ -700,6 +709,79 @@ class AdvancedTerrainRenderer:
         
         logger.info(f"Camera configured - Peak at ({peak_x:.1f}, {peak_y:.1f}), "
                      f"Camera opposite at {camera_position}")
+    
+    def _add_path_to_scene(self, plotter, mission_path, heightmap, top_mesh):
+        """Render the A* mission path on the 3D terrain mesh.
+        
+        Converts 2D path (row, col) → 3D coordinates on the mesh surface,
+        then draws a tube spline + start/goal spheres.
+        """
+        if not mission_path or len(mission_path) < 2:
+            return
+        
+        height, width = heightmap.shape[:2]
+        bounds = top_mesh.bounds
+        x_size = bounds[1] - bounds[0]
+        y_size = bounds[3] - bounds[2]
+        
+        # Vertical exaggeration must match _create_render_meshes
+        base_size = max(height, width)
+        vertical_exaggeration = 0.6
+        
+        # Convert path (row, col) → 3D (x, y, z)
+        points_3d = []
+        for row, col in mission_path:
+            # X = col index (same as mesh)
+            x = float(col)
+            # Y = flipped row (matching the Y-flip in _create_render_meshes)
+            y = float(height - 1 - row)
+            # Z = heightmap value × same scale as mesh, lifted slightly above surface
+            z = float(heightmap[row, col]) * base_size * vertical_exaggeration
+            z += base_size * 0.008  # Lift above surface to prevent z-fighting
+            points_3d.append([x, y, z])
+        
+        points_arr = np.array(points_3d, dtype=np.float32)
+        
+        # Subsample long paths to keep spline smooth and prevent memory issues
+        max_spline_pts = 300
+        if len(points_arr) > max_spline_pts:
+            indices = np.linspace(0, len(points_arr) - 1, max_spline_pts, dtype=int)
+            points_arr = points_arr[indices]
+        
+        try:
+            # Create smooth spline through path points
+            spline = pv.Spline(points_arr, n_points=len(points_arr) * 3)
+            tube = spline.tube(radius=base_size * 0.004)
+            
+            plotter.add_mesh(
+                tube,
+                color='red',
+                opacity=0.9,
+                smooth_shading=True,
+                label='Mission Path'
+            )
+            
+            # Start marker (green sphere)
+            start_pt = points_arr[0]
+            start_sphere = pv.Sphere(radius=base_size * 0.012, center=start_pt)
+            plotter.add_mesh(start_sphere, color='lime', opacity=1.0, label='Start')
+            
+            # Goal marker (red sphere)
+            goal_pt = points_arr[-1]
+            goal_sphere = pv.Sphere(radius=base_size * 0.012, center=goal_pt)
+            plotter.add_mesh(goal_sphere, color='orangered', opacity=1.0, label='Goal')
+            
+            logger.info(f"Mission path added: {len(mission_path)} waypoints, "
+                         f"tube with {tube.n_points} points")
+            
+        except Exception as e:
+            logger.warning(f"Failed to render mission path as spline: {e}")
+            # Fallback: render as simple line
+            poly = pv.PolyData(points_arr)
+            poly.lines = np.hstack([
+                [len(points_arr)] + list(range(len(points_arr)))
+            ]).astype(np.int64)
+            plotter.add_mesh(poly, color='red', line_width=5, label='Mission Path')
     
     def _setup_interactive_plotter(self, terrain_prompt):
         """Set up interactive plotter with MINIMAL settings for debugging"""
