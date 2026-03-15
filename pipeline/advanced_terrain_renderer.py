@@ -154,7 +154,9 @@ class AdvancedTerrainRenderer:
 
         # Build top vertices and bottom vertices.
         x = np.arange(width, dtype=np.float32)
-        y = np.arange(height, dtype=np.float32)
+        # Flip Y so that heightmap row-0 (image top) maps to high Y in 3D,
+        # keeping the mesh orientation consistent with the 2D heightmap.
+        y = np.arange(height, dtype=np.float32)[::-1]
         X, Y = np.meshgrid(x, y)
 
         top_points = np.column_stack([X.ravel(), Y.ravel(), z_top.ravel()])
@@ -645,46 +647,59 @@ class AdvancedTerrainRenderer:
         return actor
     
     def _set_cinematic_camera(self, plotter, mesh, heightmap):
-        """Set dramatic camera angle like reference image"""
+        """Position camera opposite the peak so the highest point faces the viewer."""
         bounds = mesh.bounds
         
-        # Calculate scene center and size
+        # Scene geometry
         x_center = (bounds[0] + bounds[1]) / 2
         y_center = (bounds[2] + bounds[3]) / 2
         z_center = (bounds[4] + bounds[5]) / 2
         z_max = bounds[5]
         z_range = bounds[5] - bounds[4]
-        
-        # Scene dimensions
         x_size = bounds[1] - bounds[0]
         y_size = bounds[3] - bounds[2]
         max_size = max(x_size, y_size)
         
-        # Simple camera position - view from corner at 45 degree angle
+        # Find the peak (highest point) in the heightmap
+        peak_idx = np.unravel_index(np.argmax(heightmap), heightmap.shape)
+        # Convert heightmap indices (row, col) to mesh coordinates
+        # row 0 → y_max, row H → y_min  (image rows go top-down)
+        # col 0 → x_min, col W → x_max
+        h, w = heightmap.shape[:2]
+        peak_x = bounds[0] + (peak_idx[1] / max(w - 1, 1)) * x_size
+        peak_y = bounds[3] - (peak_idx[0] / max(h - 1, 1)) * y_size  # flip row axis
+        
+        # Camera goes on the OPPOSITE side of the peak relative to center
+        dx = peak_x - x_center
+        dy = peak_y - y_center
+        
         camera_distance = max_size * 1.2
         camera_height = z_max + z_range * 1.2
         
+        # Place camera opposite the peak direction
         camera_position = [
-            x_center + camera_distance * 0.7,  # To the right
-            y_center - camera_distance * 0.7,  # Back
-            camera_height  # Elevated
+            x_center - dx * 1.4,  # opposite side of peak
+            y_center - dy * 1.4,  # opposite side of peak
+            camera_height
         ]
         
-        # Focus on center of terrain
-        focus_point = [x_center, y_center, z_center]
+        # Focus on the peak area (slightly above the terrain center)
+        focus_point = [
+            (x_center + peak_x) / 2,  # midpoint between center and peak
+            (y_center + peak_y) / 2,
+            z_center
+        ]
         
-        # Set camera
         plotter.camera_position = [
-            camera_position,  # Camera location
-            focus_point,      # Focus point
-            [0, 0, 1]         # Up vector
+            camera_position,
+            focus_point,
+            [0, 0, 1]  # up vector
         ]
         
-        # Reset camera to fit everything in view
         plotter.reset_camera()
         
-        logger.info(f"Camera configured - Position: {camera_position}, Focus: {focus_point}")
-        logger.info(f"Mesh bounds: {bounds}, Z-range: {z_range}")
+        logger.info(f"Camera configured - Peak at ({peak_x:.1f}, {peak_y:.1f}), "
+                     f"Camera opposite at {camera_position}")
     
     def _setup_interactive_plotter(self, terrain_prompt):
         """Set up interactive plotter with MINIMAL settings for debugging"""

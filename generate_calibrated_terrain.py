@@ -114,34 +114,35 @@ def main():
                 remaster = TerrainRemaster(
                     controlnet_type="depth",
                     device="cuda" if torch.cuda.is_available() else "cpu",
-                    use_fp16=False,
-                    enable_cpu_offload=False,
+                    use_fp16=True,   # fp16 halves RAM usage; NaN was from autocast (now disabled)
+                    enable_cpu_offload=torch.cuda.is_available(),  # Essential: frees VRAM by moving layers to CPU
                 )
+
+                # Stronger negative prompt to block map/diagram hallucinations.
+                _neg = (
+                    "abstract art, neon, glow, lava, fire, surreal patterns, checkerboard, cartoon, "
+                    "text, symbols, high contrast posterization, "
+                    "map, topographic map, diagram, labels, grid lines, illustration, "
+                    "drawing, painting, watercolor, sketch"
+                )
+
                 remastered_image, _ = remaster.remaster_heightmap(
                     heightmap=heightmap,
                     prompt=(
                         "realistic satellite-style terrain texture, alpine rock, soil, sparse vegetation, "
                         "natural erosion patterns, physically plausible shading"
                     ),
-                    negative_prompt=(
-                        "abstract art, neon, glow, lava, fire, surreal patterns, checkerboard, cartoon, "
-                        "text, symbols, high contrast posterization"
-                    ),
-                    num_inference_steps=20,
-                    guidance_scale=5.0,
-                    controlnet_conditioning_scale=1.0,
+                    negative_prompt=_neg,
+                    num_inference_steps=28,
+                    guidance_scale=12.0,         # High guidance = strong prompt adherence
+                    controlnet_conditioning_scale=1.3,  # Strong depth conditioning
                     output_size=(args.size, args.size),
                     seed=args.seed,
                     preserve_geometry=True,
                 )
 
-                # Some diffusers builds can return a list instead of a single PIL image.
-                if isinstance(remastered_image, list):
-                    if len(remastered_image) == 0:
-                        raise ValueError("Remaster returned an empty image list")
-                    remastered_image = remastered_image[0]
-
-                # Convert remaster output to a concrete image/array representation.
+                # generate() now always returns a single PIL image (not a list).
+                # Convert to numpy for validation & saving.
                 if isinstance(remastered_image, np.ndarray):
                     remaster_arr = remastered_image
                 else:
@@ -156,7 +157,46 @@ def main():
 
                 # Reject invalid/degenerate outputs (e.g., all-black or NaN/Inf collapsed).
                 if (not np.isfinite(remaster_arr).all()) or remaster_arr.max() <= 2:
+                    # Save the failed output for debugging before raising.
+                    _dbg = output_dir / "_debug_failed_remaster.png"
+                    try:
+                        Image.fromarray(remaster_arr).save(_dbg)
+                        print(f"  [debug] Failed remaster saved to {_dbg}")
+                    except Exception:
+                        pass
                     raise ValueError("Remaster produced invalid or near-empty texture")
+
+                # ── Structural quality gate ──────────────────────────────
+                # Compare the luminance of the remastered output against
+                # the original heightmap.  If the two are structurally
+                # uncorrelated, the remaster has hallucinated (e.g. map,
+                # diagram, abstract art) and should be rejected.
+                from skimage.metrics import structural_similarity as ssim
+                try:
+                    import cv2 as _cv2
+                    _lum = _cv2.cvtColor(remaster_arr, _cv2.COLOR_RGB2GRAY)
+                    _hm_u8 = (np.clip(heightmap, 0, 1) * 255).astype(np.uint8)
+                    # Resize heightmap to match remaster dimensions.
+                    if _hm_u8.shape != _lum.shape:
+                        _hm_u8 = _cv2.resize(_hm_u8, (_lum.shape[1], _lum.shape[0]),
+                                             interpolation=_cv2.INTER_LINEAR)
+                    _score = ssim(_hm_u8, _lum)
+                    print(f"  Structural similarity (SSIM) to heightmap: {_score:.3f}")
+                    if _score < 0.10:
+                        # Save for debugging before rejecting.
+                        _dbg = output_dir / "_debug_failed_remaster.png"
+                        try:
+                            Image.fromarray(remaster_arr).save(_dbg)
+                            print(f"  [debug] Failed remaster saved to {_dbg}")
+                        except Exception:
+                            pass
+                        raise ValueError(
+                            f"Remaster failed quality gate: SSIM={_score:.3f} < 0.10 "
+                            f"(output does not correlate with terrain structure)"
+                        )
+                except ImportError:
+                    print("  ⚠ skimage not installed – skipping SSIM quality gate")
+                # ─────────────────────────────────────────────────────────
 
                 enhanced_texture = remaster_arr
                 remaster_image_to_save = Image.fromarray(remaster_arr)
@@ -176,6 +216,14 @@ def main():
             output_path=str(render_3d_path)
         )
         print(f"✓ Saved 3D render: {render_3d_path}")
+
+        # Open interactive 3D viewer (drag to rotate, scroll to zoom, right-drag to pan)
+        print("\n🎮 Opening interactive 3D viewer... (press 'q' to close)")
+        renderer.create_interactive_photorealistic_visualization(
+            heightmap,
+            enhanced_texture,
+            terrain_prompt=f"Grand Canyon-Calibrated Terrain (seed={args.seed})"
+        )
     
     print("\n" + "="*70)
     print("GENERATION COMPLETE!")

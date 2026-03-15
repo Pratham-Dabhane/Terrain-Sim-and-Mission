@@ -97,16 +97,19 @@ class MemoryEfficientSD:
                 logger.warning("xformers not available, using default attention")
         
         # CPU offloading for low VRAM
+        self._cpu_offload_active = False
         if enable_cpu_offload:
             try:
                 self.pipe.enable_model_cpu_offload()
+                self._cpu_offload_active = True
                 logger.info("Enabled CPU offloading")
             except TypeError as e:
                 # Fallback for compatibility issues
                 logger.warning(f"CPU offloading failed: {e}, continuing without offloading")
             except Exception as e:
                 logger.warning(f"CPU offloading error: {e}, continuing without offloading")
-        else:
+        
+        if not self._cpu_offload_active:
             self.pipe = self.pipe.to(device)
         
         # Use memory efficient scheduler
@@ -153,11 +156,23 @@ class MemoryEfficientSD:
             seed: Random seed
             
         Returns:
-            PIL.Image: Generated image
+            PIL.Image: Generated image (single image, never a list)
         """
-        # Set seed for reproducibility
+        # Set seed for reproducibility.
+        # When CPU offload is active the pipeline executes across devices,
+        # so the generator must live on "cpu" to avoid device mismatches.
         if seed is not None:
-            generator = torch.Generator(device=self.device).manual_seed(seed)
+            # When CPU offload is active, diffusers manages device placement
+            # internally — the generator MUST live on "cpu".
+            if self._cpu_offload_active or self.device == "cpu":
+                gen_device = "cpu"
+            else:
+                gen_device = self.device
+            try:
+                generator = torch.Generator(device=gen_device).manual_seed(seed)
+            except RuntimeError:
+                # Fallback: CPU generator is always safe.
+                generator = torch.Generator(device="cpu").manual_seed(seed)
         else:
             generator = None
         
@@ -165,8 +180,12 @@ class MemoryEfficientSD:
         self.clear_memory()
         
         try:
-            # Generate
-            with torch.autocast(self.device, dtype=self.dtype):
+            # Generate — only use autocast with fp16; float32 runs fine
+            # under plain no_grad(). Autocast on low-VRAM GPUs (GTX 1650)
+            # can trigger mixed-precision paths that produce NaN.
+            use_autocast = (self.device != "cpu" and self.dtype == torch.float16)
+            ctx = torch.autocast(self.device, dtype=self.dtype) if use_autocast else torch.no_grad()
+            with ctx:
                 result = self.pipe(
                     prompt=prompt,
                     negative_prompt=negative_prompt,
@@ -180,6 +199,12 @@ class MemoryEfficientSD:
                     return_dict=False
                 )[0]
             
+            # Unwrap list results here so callers always get a single PIL Image.
+            if isinstance(result, (list, tuple)):
+                if len(result) == 0:
+                    raise ValueError("Pipeline returned an empty image list")
+                result = result[0]
+
             return result
         
         except RuntimeError as e:
@@ -213,25 +238,44 @@ class HeightmapProcessor:
         """
         Convert heightmap to depth map for ControlNet.
         
+        Uses CLAHE (Contrast-Limited Adaptive Histogram Equalization) to
+        maximise local contrast so that ControlNet receives a strong
+        structural signal regardless of the heightmap's value distribution.
+        
         Args:
             heightmap: Heightmap array (H, W) or (H, W, 1)
             
         Returns:
-            np.ndarray: Depth map for ControlNet
+            np.ndarray: Depth map RGB image (H, W, 3) uint8
         """
         if len(heightmap.shape) == 3:
             heightmap = heightmap.squeeze()
         
         # Normalize to [0, 1]
-        if heightmap.max() > 1.0:
-            heightmap = heightmap / 255.0
+        h = heightmap.astype(np.float32)
+        h_min, h_max = float(h.min()), float(h.max())
+        if h_max > h_min:
+            h = (h - h_min) / (h_max - h_min)
+        else:
+            h = np.ones_like(h) * 0.5
         
-        # Apply gamma correction to enhance depth perception
-        depth = np.power(heightmap, 0.7)
+        # Convert to uint8 for CLAHE
+        depth_u8 = (h * 255).astype(np.uint8)
+        
+        # Apply CLAHE for strong local contrast — this is the key fix.
+        # Without it, the depth conditioning image is low-contrast and
+        # ControlNet cannot firmly guide the diffusion, leading to
+        # hallucinated/map-like outputs on many seeds.
+        try:
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            depth_u8 = clahe.apply(depth_u8)
+        except Exception as exc:
+            logger.warning("CLAHE failed, using linear stretch fallback: %s", exc)
+            # Fallback: simple linear contrast stretch
+            depth_u8 = cv2.normalize(depth_u8, None, 0, 255, cv2.NORM_MINMAX)
         
         # Convert to 3-channel image
-        depth_rgb = np.stack([depth] * 3, axis=-1)
-        depth_rgb = (depth_rgb * 255).astype(np.uint8)
+        depth_rgb = np.stack([depth_u8] * 3, axis=-1)
         
         return depth_rgb
     
@@ -348,21 +392,23 @@ class TerrainRemaster:
         """
         Enhance prompt for better terrain generation.
         
+        Uses terrain-specific descriptors only.  Generic photography
+        buzzwords ("professional photography", "8k resolution") were
+        causing SD v1.5 to interpret the depth map as a photograph of a
+        printed topographic map, leading to hallucinated outputs.
+        
         Args:
             prompt: Original prompt
             
         Returns:
             str: Enhanced prompt
         """
-        # Add terrain-specific style keywords
+        # Terrain-specific style keywords only — no generic photo terms.
         style_keywords = [
-            "highly detailed",
-            "realistic",
-            "natural landscape",
-            "photorealistic",
-            "sharp focus",
-            "8k resolution",
-            "professional photography"
+            "top-down satellite orthophoto",
+            "natural terrain surface texture",
+            "realistic ground material",
+            "detailed earth surface",
         ]
         
         enhanced = f"{prompt}, {', '.join(style_keywords)}"
@@ -372,10 +418,14 @@ class TerrainRemaster:
         self,
         heightmap: Union[np.ndarray, torch.Tensor, Image.Image],
         prompt: str,
-        negative_prompt: str = "blurry, low quality, distorted, artifacts, unrealistic, cartoon",
-        num_inference_steps: int = 20,
-        guidance_scale: float = 7.5,
-        controlnet_conditioning_scale: float = 0.8,  # Lower for geometry preservation
+        negative_prompt: str = (
+            "blurry, low quality, distorted, artifacts, unrealistic, cartoon, "
+            "map, topographic map, diagram, text, labels, grid lines, illustration, "
+            "drawing, painting, watercolor, sketch, neon, abstract, checkerboard"
+        ),
+        num_inference_steps: int = 28,
+        guidance_scale: float = 8.5,
+        controlnet_conditioning_scale: float = 1.0,  # Strong depth conditioning
         output_size: Tuple[int, int] = (512, 512),
         seed: Optional[int] = None,
         preserve_geometry: bool = True
