@@ -9,16 +9,19 @@ Usage:
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+from PIL import Image
 from pathlib import Path
 
 from pipeline.procedural_noise_utils import generate_procedural_heightmap, NoiseParams
 from pipeline.advanced_terrain_renderer import AdvancedTerrainRenderer
+from pipeline.terrain_texture_mapper import colorize_by_elevation_and_slope
 
 # CALIBRATED PARAMETERS from Grand Canyon DEM (n36_w113)
 GRAND_CANYON_PARAMS = NoiseParams(
-    scale=300.0,      # Calibrated from DEM
-    octaves=6,
-    persistence=0.5,
+    scale=140.0,      # Lower scale to reduce broad banding and add terrain detail
+    octaves=7,        # Slightly more multi-scale detail
+    persistence=0.58, # Slightly stronger high-frequency contribution
     lacunarity=2.0,
     seed=42,          # Default seed (can be changed)
     mountain_weight=0.80,
@@ -33,6 +36,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for variation")
     parser.add_argument("--size", type=int, default=512, help="Terrain size (512 or 1024)")
     parser.add_argument("--interactive-3d", action="store_true", help="Launch interactive 3D viewer")
+    parser.add_argument("--remaster-top", action="store_true", help="Optional SD/ControlNet remaster for top texture")
     parser.add_argument("--output", type=str, default="Output/calibrated_terrain", help="Output directory")
     args = parser.parse_args()
     
@@ -98,8 +102,63 @@ def main():
         # Use advanced renderer for smooth mesh
         renderer = AdvancedTerrainRenderer()
         
-        # Create dummy texture (same size as heightmap for simple visualization)
-        enhanced_texture = np.stack([heightmap] * 3, axis=-1)  # RGB from heightmap
+        # Use terrain color mapping so top surface is not grayscale/dim.
+        enhanced_texture = np.array(colorize_by_elevation_and_slope(heightmap))
+
+        # Optional final realism pass: remaster the top texture with SD + ControlNet.
+        if args.remaster_top:
+            try:
+                from pipeline.remaster_sd_controlnet import TerrainRemaster
+
+                print("Applying optional SD/ControlNet top remaster...")
+                remaster = TerrainRemaster(
+                    controlnet_type="depth",
+                    device="cuda" if torch.cuda.is_available() else "cpu",
+                    use_fp16=False,
+                    enable_cpu_offload=False,
+                )
+                remastered_image, _ = remaster.remaster_heightmap(
+                    heightmap=heightmap,
+                    prompt=f"realistic terrain texture, alpine rock and soil, seed {args.seed}",
+                    num_inference_steps=16,
+                    guidance_scale=6.0,
+                    controlnet_conditioning_scale=0.65,
+                    output_size=(args.size, args.size),
+                    seed=args.seed,
+                    preserve_geometry=True,
+                )
+
+                # Some diffusers builds can return a list instead of a single PIL image.
+                if isinstance(remastered_image, list):
+                    if len(remastered_image) == 0:
+                        raise ValueError("Remaster returned an empty image list")
+                    remastered_image = remastered_image[0]
+
+                # Convert remaster output to a concrete image/array representation.
+                if isinstance(remastered_image, np.ndarray):
+                    remaster_arr = remastered_image
+                else:
+                    remaster_arr = np.array(remastered_image)
+
+                # Normalize common remaster output ranges to uint8 safely.
+                if remaster_arr.dtype != np.uint8:
+                    remaster_arr = remaster_arr.astype(np.float32)
+                    if remaster_arr.max() <= 1.0 and remaster_arr.min() >= 0.0:
+                        remaster_arr = remaster_arr * 255.0
+                    remaster_arr = np.clip(remaster_arr, 0.0, 255.0).astype(np.uint8)
+
+                # Reject invalid/degenerate outputs (e.g., all-black or NaN/Inf collapsed).
+                if (not np.isfinite(remaster_arr).all()) or remaster_arr.max() <= 2:
+                    raise ValueError("Remaster produced invalid or near-empty texture")
+
+                enhanced_texture = remaster_arr
+                remaster_image_to_save = Image.fromarray(remaster_arr)
+
+                remaster_path = output_dir / "top_texture_remastered.png"
+                remaster_image_to_save.save(remaster_path)
+                print(f"✓ Saved remastered top texture: {remaster_path}")
+            except Exception as e:
+                print(f"⚠ Remaster step skipped (fallback to procedural texture): {e}")
         
         # Save 3D render as image (not interactive)
         render_3d_path = output_dir / "terrain_3d_render.png"

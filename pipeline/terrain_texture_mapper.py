@@ -7,6 +7,62 @@ import numpy as np
 from PIL import Image
 
 
+def _smoothstep(edge0, edge1, x):
+    """Smooth interpolation in [0,1] between two edges."""
+    t = np.clip((x - edge0) / (edge1 - edge0 + 1e-8), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _gaussian_blur(arr, sigma=2.0):
+    """Best-effort Gaussian blur with graceful fallback."""
+    try:
+        from scipy import ndimage
+        return ndimage.gaussian_filter(arr, sigma=sigma)
+    except Exception:
+        # Fallback: simple box blur using rolling average.
+        out = arr.astype(np.float32)
+        for _ in range(3):
+            out = (
+                out
+                + np.roll(out, 1, axis=0)
+                + np.roll(out, -1, axis=0)
+                + np.roll(out, 1, axis=1)
+                + np.roll(out, -1, axis=1)
+            ) / 5.0
+        return out
+
+
+def _compute_normals_and_slope(heightmap):
+    """Compute per-pixel normals and normalized slope from heightmap gradients."""
+    dy, dx = np.gradient(heightmap.astype(np.float32))
+    slope = np.sqrt(dx * dx + dy * dy)
+    slope_n = slope / (slope.max() + 1e-8)
+
+    nx = -dx
+    ny = -dy
+    nz = np.ones_like(heightmap, dtype=np.float32)
+    norm = np.sqrt(nx * nx + ny * ny + nz * nz) + 1e-8
+    nx /= norm
+    ny /= norm
+    nz /= norm
+    return nx, ny, nz, slope_n
+
+
+def _compute_relief_shading(heightmap, nx, ny, nz):
+    """Compute hillshade and ambient-occlusion-like term from local relief."""
+    # Sun direction (normalized) for readable relief.
+    sun = np.array([0.45, -0.35, 0.82], dtype=np.float32)
+    sun = sun / (np.linalg.norm(sun) + 1e-8)
+
+    hillshade = np.clip(nx * sun[0] + ny * sun[1] + nz * sun[2], 0.0, 1.0)
+    hillshade = 0.68 + 0.32 * hillshade
+
+    local_mean = _gaussian_blur(heightmap.astype(np.float32), sigma=2.5)
+    cavity = np.clip(local_mean - heightmap, 0.0, 1.0)
+    ao = np.clip(1.0 - 0.7 * cavity, 0.62, 1.0)
+    return hillshade, ao
+
+
 def colorize_by_elevation_and_slope(heightmap):
     """
     Colorize a heightmap based on elevation and slope for realistic terrain visualization.
@@ -30,71 +86,66 @@ def colorize_by_elevation_and_slope(heightmap):
         if heightmap.max() > 1.0:
             heightmap = heightmap / 255.0
         heightmap = np.clip(heightmap, 0, 1)
-    
-    height, width = heightmap.shape
-    
-    # Compute slope using gradient magnitude
-    grad_y, grad_x = np.gradient(heightmap)
-    slope = np.sqrt(grad_x**2 + grad_y**2)
-    
-    # Normalize slope for darkening factor (0-1)
-    slope_normalized = np.clip(slope / slope.max() if slope.max() > 0 else slope, 0, 1)
-    
-    # Initialize RGB channels
-    rgb_image = np.zeros((height, width, 3), dtype=np.uint8)
-    
-    # Define color thresholds and base colors
-    water_threshold = 0.2
-    grass_threshold = 0.45
-    rock_threshold = 0.75
-    
-    # Water areas (blue shades)
-    water_mask = heightmap < water_threshold
-    water_depth = (water_threshold - heightmap) / water_threshold  # Deeper = darker
-    water_depth = np.clip(water_depth, 0, 1)
-    
-    rgb_image[water_mask, 0] = (30 + 50 * (1 - water_depth[water_mask])).astype(np.uint8)  # R: 30-80
-    rgb_image[water_mask, 1] = (100 + 100 * (1 - water_depth[water_mask])).astype(np.uint8)  # G: 100-200
-    rgb_image[water_mask, 2] = (200 + 55 * (1 - water_depth[water_mask])).astype(np.uint8)  # B: 200-255
-    
-    # Grass areas (green shades)
-    grass_mask = (heightmap >= water_threshold) & (heightmap < grass_threshold)
-    grass_height = (heightmap - water_threshold) / (grass_threshold - water_threshold)
-    grass_height = np.clip(grass_height, 0, 1)
-    
-    # Apply slope darkening to grass
-    slope_factor = 1 - 0.3 * slope_normalized  # Reduce brightness by up to 30% on steep slopes
-    
-    rgb_image[grass_mask, 0] = (50 + 80 * grass_height[grass_mask] * slope_factor[grass_mask]).astype(np.uint8)  # R: 50-130
-    rgb_image[grass_mask, 1] = (120 + 100 * grass_height[grass_mask] * slope_factor[grass_mask]).astype(np.uint8)  # G: 120-220
-    rgb_image[grass_mask, 2] = (30 + 50 * grass_height[grass_mask] * slope_factor[grass_mask]).astype(np.uint8)  # B: 30-80
-    
-    # Rock areas (brown shades with strong slope darkening)
-    rock_mask = (heightmap >= grass_threshold) & (heightmap < rock_threshold)
-    rock_height = (heightmap - grass_threshold) / (rock_threshold - grass_threshold)
-    rock_height = np.clip(rock_height, 0, 1)
-    
-    # Strong slope darkening for rocks
-    slope_factor = 1 - 0.5 * slope_normalized  # Reduce brightness by up to 50% on steep slopes
-    
-    rgb_image[rock_mask, 0] = (100 + 80 * rock_height[rock_mask] * slope_factor[rock_mask]).astype(np.uint8)  # R: 100-180
-    rgb_image[rock_mask, 1] = (60 + 60 * rock_height[rock_mask] * slope_factor[rock_mask]).astype(np.uint8)  # G: 60-120
-    rgb_image[rock_mask, 2] = (30 + 40 * rock_height[rock_mask] * slope_factor[rock_mask]).astype(np.uint8)  # B: 30-70
-    
-    # Snow areas (white shades)
-    snow_mask = heightmap >= rock_threshold
-    snow_height = (heightmap - rock_threshold) / (1 - rock_threshold)
-    snow_height = np.clip(snow_height, 0, 1)
-    
-    # Light slope darkening for snow
-    slope_factor = 1 - 0.2 * slope_normalized  # Reduce brightness by up to 20% on steep slopes
-    
-    base_snow = 200 + 55 * snow_height[snow_mask] * slope_factor[snow_mask]
-    rgb_image[snow_mask, 0] = base_snow.astype(np.uint8)  # R: 200-255
-    rgb_image[snow_mask, 1] = base_snow.astype(np.uint8)  # G: 200-255
-    rgb_image[snow_mask, 2] = base_snow.astype(np.uint8)  # B: 200-255
-    
-    # Convert to PIL Image
+    nx, ny, nz, slope_n = _compute_normals_and_slope(heightmap)
+
+    # Curvature proxy from Laplacian-like second derivatives.
+    dy, dx = np.gradient(heightmap.astype(np.float32))
+    dyy = np.gradient(dy, axis=0)
+    dxx = np.gradient(dx, axis=1)
+    curvature = dxx + dyy
+    convex = np.clip(curvature, 0.0, None)
+    concave = np.clip(-curvature, 0.0, None)
+    convex_n = convex / (convex.max() + 1e-8)
+    concave_n = concave / (concave.max() + 1e-8)
+
+    # Material weights from terrain attributes.
+    water_w = 1.0 - _smoothstep(0.10, 0.20, heightmap)
+    snow_w = _smoothstep(0.68, 0.88, heightmap) * (0.6 + 0.4 * nz)
+    rock_w = np.clip(_smoothstep(0.20, 0.75, slope_n) + 0.35 * convex_n, 0.0, 1.0)
+    grass_w = _smoothstep(0.16, 0.40, heightmap) * (1.0 - _smoothstep(0.40, 0.85, slope_n))
+    soil_w = np.clip(0.45 * concave_n + _smoothstep(0.18, 0.55, heightmap) * (1.0 - grass_w), 0.0, 1.0)
+
+    # Tri-planar-style proxy: steep faces bias to rock/soil, flat tops bias to grass/snow.
+    steep = np.clip(1.0 - nz, 0.0, 1.0)
+    rock_w = np.clip(rock_w + 0.6 * steep, 0.0, 1.0)
+    soil_w = np.clip(soil_w + 0.25 * steep, 0.0, 1.0)
+    grass_w = np.clip(grass_w * (1.0 - 0.5 * steep), 0.0, 1.0)
+    snow_w = np.clip(snow_w * (0.75 + 0.25 * nz), 0.0, 1.0)
+
+    # Normalize weights.
+    stack = np.stack([water_w, soil_w, grass_w, rock_w, snow_w], axis=0)
+    weight_sum = np.sum(stack, axis=0) + 1e-8
+    weights = stack / weight_sum
+    water_w, soil_w, grass_w, rock_w, snow_w = weights
+
+    # Base material colors (R, G, B).
+    water_color = np.array([70.0, 135.0, 205.0], dtype=np.float32)
+    soil_color = np.array([132.0, 96.0, 62.0], dtype=np.float32)
+    grass_color = np.array([88.0, 142.0, 76.0], dtype=np.float32)
+    rock_color = np.array([138.0, 131.0, 123.0], dtype=np.float32)
+    snow_color = np.array([236.0, 239.0, 244.0], dtype=np.float32)
+
+    rgb = (
+        water_w[..., None] * water_color
+        + soil_w[..., None] * soil_color
+        + grass_w[..., None] * grass_color
+        + rock_w[..., None] * rock_color
+        + snow_w[..., None] * snow_color
+    )
+
+    # Relief shading from normals + AO-like local shadowing.
+    hillshade, ao = _compute_relief_shading(heightmap, nx, ny, nz)
+    shade = hillshade * ao
+    rgb = rgb * shade[..., None]
+
+    # Slight elevation warmth in lowlands and coolness at peaks.
+    elev = heightmap.astype(np.float32)
+    warm_tint = np.array([1.04, 1.00, 0.96], dtype=np.float32)
+    cool_tint = np.array([0.95, 0.98, 1.03], dtype=np.float32)
+    tint = (1.0 - elev)[..., None] * warm_tint + elev[..., None] * cool_tint
+    rgb = rgb * tint
+
+    rgb_image = np.clip(rgb, 0.0, 255.0).astype(np.uint8)
     colored_terrain = Image.fromarray(rgb_image, mode='RGB')
     
     return colored_terrain

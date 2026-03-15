@@ -40,22 +40,27 @@ class AdvancedTerrainRenderer:
         logger.info("Creating photorealistic 3D visualization...")
         
         try:
-            # 1. Create high-resolution mesh with enhanced scaling
-            mesh = self._create_enhanced_mesh(heightmap)
-            logger.info(f"Enhanced mesh created: {mesh.n_points} points")
+            # 1. Build separate meshes: top relief + side/bottom block
+            top_mesh, block_mesh = self._create_render_meshes(heightmap)
+            logger.info(
+                f"Render meshes created: top={top_mesh.n_points} points, "
+                f"block={block_mesh.n_points} points"
+            )
             
             # 2. Apply realistic texture mapping
-            mesh = self._apply_texture_mapping(mesh, enhanced_texture, heightmap)
-            logger.info("Realistic texture mapping applied")
+            top_mesh = self._apply_texture_mapping(top_mesh, enhanced_texture, heightmap)
+            logger.info("Top-surface texture mapping applied")
             
             # 3. Set up photorealistic rendering
             plotter = self._setup_advanced_plotter()
             
-            # 4. Add terrain with enhanced materials
-            self._add_photorealistic_terrain(plotter, mesh, terrain_prompt)
+            # 4. Add block first, then top relief mesh
+            self._add_block_mesh(plotter, block_mesh)
+            self._add_photorealistic_terrain(plotter, top_mesh, terrain_prompt)
             
             # 5. Set cinematic camera
-            self._set_cinematic_camera(plotter, mesh, heightmap)
+            scene_mesh = top_mesh.merge(block_mesh)
+            self._set_cinematic_camera(plotter, scene_mesh, heightmap)
             
             # 6. Render high-quality image
             plotter.screenshot(output_path, window_size=(1920, 1080), return_img=False)
@@ -75,23 +80,31 @@ class AdvancedTerrainRenderer:
         logger.info(f"Heightmap shape: {heightmap.shape}, range: [{heightmap.min():.3f}, {heightmap.max():.3f}]")
         
         try:
-            # Create mesh
-            mesh = self._create_enhanced_mesh(heightmap)
-            logger.info(f"Enhanced mesh created: {mesh.n_points} points, bounds: {mesh.bounds}")
+            # Build separate meshes: top relief + side/bottom block
+            top_mesh, block_mesh = self._create_render_meshes(heightmap)
+            logger.info(
+                f"Render meshes created: top={top_mesh.n_points} points, "
+                f"block={block_mesh.n_points} points"
+            )
             
             # Apply realistic texture mapping (same as static visualization)
-            mesh = self._apply_texture_mapping(mesh, enhanced_texture, heightmap)
-            logger.info("Realistic texture mapping applied")
+            top_mesh = self._apply_texture_mapping(top_mesh, enhanced_texture, heightmap)
+            logger.info("Top-surface texture mapping applied")
             
             # Set up plotter
             plotter = self._setup_interactive_plotter(terrain_prompt)
             
             # Add terrain with photorealistic materials
-            self._add_photorealistic_terrain(plotter, mesh, terrain_prompt)
-            logger.info(f"✓ Mesh added with photorealistic materials: {mesh.n_points} points, {mesh.n_cells} cells")
+            self._add_block_mesh(plotter, block_mesh)
+            self._add_photorealistic_terrain(plotter, top_mesh, terrain_prompt)
+            logger.info(
+                f"✓ Meshes added with photorealistic materials: "
+                f"top={top_mesh.n_points} points, block={block_mesh.n_points} points"
+            )
             
             # Camera setup
-            self._set_cinematic_camera(plotter, mesh, heightmap)
+            scene_mesh = top_mesh.merge(block_mesh)
+            self._set_cinematic_camera(plotter, scene_mesh, heightmap)
             cam = plotter.camera
             logger.info(f"  Camera position: {cam.position}")
             logger.info(f"  Camera focal point: {cam.focal_point}")
@@ -111,53 +124,129 @@ class AdvancedTerrainRenderer:
             traceback.print_exc()
             raise
     
-    def _create_enhanced_mesh(self, heightmap):
-        """Create enhanced mesh with adaptive dramatic scaling"""
+    def _smooth_heightmap_for_render(self, heightmap, sigma=0.8):
+        """Apply gentle smoothing only for rendering to reduce spike artifacts."""
+        try:
+            from scipy import ndimage
+            smoothed = ndimage.gaussian_filter(heightmap.astype(np.float32), sigma=sigma)
+            return smoothed
+        except Exception:
+            # Fallback keeps existing behavior if scipy is unavailable at runtime.
+            return heightmap.astype(np.float32)
+
+    def _create_render_meshes(self, heightmap):
+        """Create separate meshes for top relief and side/bottom block."""
         height, width = heightmap.shape
-        
-        # Create coordinate grids
+
+        # Gentle render-time smoothing to remove needle-like spikes.
+        smoothed_heightmap = self._smooth_heightmap_for_render(heightmap, sigma=0.8)
+
+        # Keep moderate vertical exaggeration.
+        base_size = max(height, width)
+        vertical_exaggeration = 0.6
+        z_top = smoothed_heightmap * base_size * vertical_exaggeration
+
+        # Flat bottom plane depth below the minimum top elevation.
+        top_min = float(z_top.min())
+        top_range = float(z_top.max() - z_top.min())
+        base_depth = max(base_size * 0.18, top_range * 0.35)
+        z_bottom = top_min - base_depth
+
+        # Build top vertices and bottom vertices.
         x = np.arange(width, dtype=np.float32)
         y = np.arange(height, dtype=np.float32)
         X, Y = np.meshgrid(x, y)
-        
-        # Adaptive vertical scaling: scale Z relative to terrain dimensions
-        # This ensures dramatic relief regardless of resolution
-        base_size = max(height, width)
-        vertical_exaggeration = 0.6  # Reduced to avoid over-exaggerated, crumpled relief
-        Z = heightmap * base_size * vertical_exaggeration
-        
-        # Create points array
-        points = np.column_stack([
+
+        top_points = np.column_stack([X.ravel(), Y.ravel(), z_top.ravel()])
+        bottom_points = np.column_stack([
             X.ravel(),
-            Y.ravel(), 
-            Z.ravel()
+            Y.ravel(),
+            np.full(height * width, z_bottom, dtype=np.float32),
         ])
-        
-        # Create faces for structured grid
+        # Top relief mesh (surface only).
+        top_faces = []
+        for i in range(height - 1):
+            for j in range(width - 1):
+                t1 = i * width + j
+                t2 = i * width + (j + 1)
+                t3 = (i + 1) * width + j
+                t4 = (i + 1) * width + (j + 1)
+                top_faces.extend([3, t1, t2, t3])
+                top_faces.extend([3, t2, t4, t3])
+
+        top_mesh = pv.PolyData(top_points, np.array(top_faces, dtype=np.int64))
+        top_mesh = top_mesh.subdivide(nsub=1, subfilter='butterfly')
+        top_mesh = top_mesh.smooth(n_iter=25, relaxation_factor=0.1)
+        top_mesh = top_mesh.compute_normals(cell_normals=False, point_normals=True, inplace=False)
+
+        # Block mesh (side walls + flat bottom only, no top faces to avoid z-fighting).
+        points = np.vstack([top_points, bottom_points]).astype(np.float32)
+
+        n_top = height * width
+
+        def tidx(i, j):
+            return i * width + j
+
+        def bidx(i, j):
+            return n_top + i * width + j
+
         faces = []
-        for j in range(height - 1):
-            for i in range(width - 1):
-                # Two triangles per quad
-                p1 = j * width + i
-                p2 = j * width + (i + 1)
-                p3 = (j + 1) * width + i
-                p4 = (j + 1) * width + (i + 1)
-                
-                faces.extend([3, p1, p2, p3])  # First triangle
-                faces.extend([3, p2, p4, p3])  # Second triangle
-        
-        # Create PolyData mesh
-        mesh = pv.PolyData(points, faces)
-        
-        # Smooth the mesh to reduce zigzag artifacts
-        # Subdivision adds intermediate vertices for higher resolution
-        mesh = mesh.subdivide(nsub=1, subfilter='butterfly')  # 4x more triangles
-        # Laplacian smoothing eliminates sharp edges while preserving features
-        mesh = mesh.smooth(n_iter=25, relaxation_factor=0.1)
-        
-        logger.info(f"Mesh smoothed: {mesh.n_points} points after subdivision")
-        
-        return mesh
+
+        # Bottom surface only.
+        for i in range(height - 1):
+            for j in range(width - 1):
+                t1 = tidx(i, j)
+                t2 = tidx(i, j + 1)
+                t3 = tidx(i + 1, j)
+                t4 = tidx(i + 1, j + 1)
+
+                b1 = bidx(i, j)
+                b2 = bidx(i, j + 1)
+                b3 = bidx(i + 1, j)
+                b4 = bidx(i + 1, j + 1)
+
+                # Reverse winding for bottom face.
+                faces.extend([3, b1, b3, b2])
+                faces.extend([3, b2, b3, b4])
+
+        # North and south walls.
+        for j in range(width - 1):
+            nt1, nt2 = tidx(0, j), tidx(0, j + 1)
+            nb1, nb2 = bidx(0, j), bidx(0, j + 1)
+            faces.extend([3, nt1, nb1, nt2])
+            faces.extend([3, nt2, nb1, nb2])
+
+            st1, st2 = tidx(height - 1, j), tidx(height - 1, j + 1)
+            sb1, sb2 = bidx(height - 1, j), bidx(height - 1, j + 1)
+            faces.extend([3, st1, st2, sb1])
+            faces.extend([3, st2, sb2, sb1])
+
+        # West and east walls.
+        for i in range(height - 1):
+            wt1, wt2 = tidx(i, 0), tidx(i + 1, 0)
+            wb1, wb2 = bidx(i, 0), bidx(i + 1, 0)
+            faces.extend([3, wt1, wt2, wb1])
+            faces.extend([3, wt2, wb2, wb1])
+
+            et1, et2 = tidx(i, width - 1), tidx(i + 1, width - 1)
+            eb1, eb2 = bidx(i, width - 1), bidx(i + 1, width - 1)
+            faces.extend([3, et1, eb1, et2])
+            faces.extend([3, et2, eb1, eb2])
+
+        block_mesh = pv.PolyData(points, np.array(faces, dtype=np.int64))
+        block_mesh = block_mesh.compute_normals(cell_normals=False, point_normals=True, inplace=False)
+
+        logger.info(
+            f"Solid terrain block created: {block_mesh.n_points} points, {block_mesh.n_cells} cells, "
+            f"base_depth={base_depth:.2f}"
+        )
+
+        return top_mesh, block_mesh
+
+    def _create_enhanced_mesh(self, heightmap):
+        """Backward-compatible helper returning merged top+block mesh."""
+        top_mesh, block_mesh = self._create_render_meshes(heightmap)
+        return top_mesh.merge(block_mesh)
     
     def _apply_texture_mapping(self, mesh, enhanced_texture, heightmap):
         """Apply realistic texture colors to mesh vertices"""
@@ -166,7 +255,18 @@ class AdvancedTerrainRenderer:
         if isinstance(enhanced_texture, Image.Image):
             texture_array = np.array(enhanced_texture)
         else:
-            texture_array = enhanced_texture
+            texture_array = np.asarray(enhanced_texture)
+
+        # Normalize to HxWx3 to avoid shape-related indexing blowups.
+        if texture_array.ndim == 4:
+            # Common case from some remaster pipelines: (1, H, W, C)
+            texture_array = texture_array[0]
+        if texture_array.ndim == 2:
+            texture_array = np.stack([texture_array] * 3, axis=-1)
+        if texture_array.ndim == 3 and texture_array.shape[2] == 1:
+            texture_array = np.repeat(texture_array, 3, axis=2)
+        if texture_array.ndim != 3 or texture_array.shape[2] < 3:
+            raise ValueError(f"Unexpected texture shape for mapping: {texture_array.shape}")
         
         # Get mesh points
         points = mesh.points
@@ -191,7 +291,7 @@ class AdvancedTerrainRenderer:
         
         # Enhanced coloring based on elevation
         colors_enhanced = self._enhance_colors_by_elevation(colors, z_coords, heightmap)
-        
+
         # Normalize to [0, 1] for PyVista
         colors_normalized = colors_enhanced.astype(np.float32) / 255.0
         
@@ -200,6 +300,19 @@ class AdvancedTerrainRenderer:
         mesh.set_active_scalars('RGB')
         
         return mesh
+
+    def _add_block_mesh(self, plotter, block_mesh):
+        """Add side/bottom block with matte earth tone."""
+        return plotter.add_mesh(
+            block_mesh,
+            color=(0.38, 0.28, 0.21),
+            smooth_shading=True,
+            show_edges=False,
+            ambient=0.14,
+            diffuse=0.62,
+            specular=0.0,
+            specular_power=1,
+        )
     
     def _enhance_colors_by_elevation(self, colors, elevations, heightmap):
         """Enhance colors with realistic muted earth tones"""
@@ -436,7 +549,7 @@ class AdvancedTerrainRenderer:
                 position=(500, 500, 800),
                 focal_point=(0, 0, 0),
                 color=[1.0, 0.95, 0.8],  # Warm sunlight
-                intensity=0.8
+                intensity=0.65
             )
             plotter.add_light(sun_light)
             
@@ -444,7 +557,7 @@ class AdvancedTerrainRenderer:
             sky_light = pv.Light(
                 position=(0, 0, 1000),
                 color=[0.7, 0.8, 1.0],  # Blue sky light
-                intensity=0.4
+                intensity=0.55
             )
             plotter.add_light(sky_light)
             
@@ -453,7 +566,7 @@ class AdvancedTerrainRenderer:
                 position=(-300, -300, 400),
                 focal_point=(0, 0, 0),
                 color=[1.0, 1.0, 1.0],
-                intensity=0.2
+                intensity=0.35
             )
             plotter.add_light(fill_light)
             
@@ -470,52 +583,52 @@ class AdvancedTerrainRenderer:
         # Most terrain is MATTE - very low specular!
         if any(word in prompt_lower for word in ['forest', 'green', 'tree', 'jungle', 'vegetation']):
             material_props = {
-                'ambient': 0.3,
-                'diffuse': 0.9,
+                'ambient': 0.42,
+                'diffuse': 0.98,
                 'specular': 0.0,  # No shine on vegetation
                 'specular_power': 1
             }
         elif any(word in prompt_lower for word in ['desert', 'sand', 'dune', 'sahara', 'arid']):
             material_props = {
-                'ambient': 0.35,
-                'diffuse': 0.95,
+                'ambient': 0.46,
+                'diffuse': 1.00,
                 'specular': 0.02,  # Barely any shine on sand
                 'specular_power': 5
             }
         elif any(word in prompt_lower for word in ['snow', 'ice', 'glacier', 'arctic', 'frozen']):
             # Snow is NOT shiny like plastic - it's matte!
             material_props = {
-                'ambient': 0.4,
-                'diffuse': 0.9,
+                'ambient': 0.52,
+                'diffuse': 1.00,
                 'specular': 0.05,  # Very subtle
                 'specular_power': 10
             }
         elif any(word in prompt_lower for word in ['mountain', 'rock', 'rocky', 'cliff', 'crag']):
             material_props = {
-                'ambient': 0.25,
-                'diffuse': 0.85,
+                'ambient': 0.38,
+                'diffuse': 0.95,
                 'specular': 0.03,  # Rock is mostly matte
                 'specular_power': 8
             }
         elif any(word in prompt_lower for word in ['volcanic', 'lava', 'crater']):
             material_props = {
-                'ambient': 0.2,
-                'diffuse': 0.9,
+                'ambient': 0.32,
+                'diffuse': 0.96,
                 'specular': 0.01,
                 'specular_power': 5
             }
         elif any(word in prompt_lower for word in ['canyon', 'mesa', 'plateau', 'badlands']):
             material_props = {
-                'ambient': 0.3,
-                'diffuse': 0.9,
+                'ambient': 0.40,
+                'diffuse': 0.98,
                 'specular': 0.02,
                 'specular_power': 6
             }
         else:
             # Default: natural matte terrain
             material_props = {
-                'ambient': 0.3,
-                'diffuse': 0.9,
+                'ambient': 0.40,
+                'diffuse': 0.98,
                 'specular': 0.02,
                 'specular_power': 8
             }
