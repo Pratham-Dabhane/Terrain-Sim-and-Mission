@@ -119,10 +119,17 @@ def main():
                 )
                 remastered_image, _ = remaster.remaster_heightmap(
                     heightmap=heightmap,
-                    prompt=f"realistic terrain texture, alpine rock and soil, seed {args.seed}",
-                    num_inference_steps=16,
-                    guidance_scale=6.0,
-                    controlnet_conditioning_scale=0.65,
+                    prompt=(
+                        "realistic satellite-style terrain texture, alpine rock, soil, sparse vegetation, "
+                        "natural erosion patterns, physically plausible shading"
+                    ),
+                    negative_prompt=(
+                        "abstract art, neon, glow, lava, fire, surreal patterns, checkerboard, cartoon, "
+                        "text, symbols, high contrast posterization"
+                    ),
+                    num_inference_steps=20,
+                    guidance_scale=5.0,
+                    controlnet_conditioning_scale=1.0,
                     output_size=(args.size, args.size),
                     seed=args.seed,
                     preserve_geometry=True,
