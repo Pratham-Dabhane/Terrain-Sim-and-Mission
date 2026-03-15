@@ -1,192 +1,259 @@
-# Terrain Simulation and Mission Planning
+# Terrain Simulation and Mission Planning System
 
-End-to-end terrain generation and mission planning system that turns natural language prompts into 3D landscapes and computes cost-aware navigation paths over them.
+## 1. Project Title
+Terrain Simulation and Mission Planning System
 
-The project combines procedural terrain synthesis, GPU-accelerated 3D rendering, and an A* planner operating on learned cost maps derived from elevation and slope.
+## 2. Short Description
+This project is a research-oriented pipeline for generating synthetic terrain, calibrating it against real-world DEM statistics, and running mission planning analysis on the resulting landscapes.  
+It combines procedural terrain synthesis, physically motivated erosion, terrain attribute and biome analysis, optional diffusion-based texture remastering, and A*-based route planning.  
+The system is designed for reproducible experimentation, algorithm benchmarking, and scenario generation where realistic topography and traversal feasibility are both required.  
+It supports both script-based workflows and service-style execution, with exportable artifacts for visualization and downstream analysis.
 
----
+## 3. Key Features
+- Procedural macro-to-micro terrain generation using fBM, domain warping, and terrain mixing controls
+- Physical post-processing with hydraulic and thermal erosion
+- Terrain attribute extraction and smooth biome mask generation
+- DEM-based calibration against real-world terrain statistics
+- Cost-map construction for mobility/traversability analysis
+- A* mission path planning with path statistics and visual overlays
+- High-quality 3D rendering and interactive terrain viewing
+- Optional Stable Diffusion + ControlNet remastering for top-surface texturing
+- FastAPI service layer for end-to-end generation workflows
+- Automated tests for core analysis, calibration, erosion, cost-map, and planner behavior
 
-## Features
+## 4. Project Architecture
+### High-Level Overview
+The system is implemented as a modular terrain pipeline with optional branches for calibration, texture remastering, and service deployment.
 
-- **Multi-stage terrain pipeline**:
-  - **Phase 1**: Macro-to-micro terrain generation with continental-scale structure and domain warping
-  - **Phase 2**: Physically-motivated erosion (hydraulic + thermal) for realistic weathering
-  - **Phase 3**: Terrain analysis with automatic biome classification (snow, rock, scree, forest, grassland, wetlands, water)
-  - **Phase 4**: DEM-based calibration to ground procedural parameters in real-world terrain statistics
-- Text-to-terrain generation from natural language prompts using procedural noise and prompt-derived parameters
-- GPU-accelerated 3D terrain rendering with PyVista/VTK (interactive and offline)
-- Cost-aware mission planning via A* on terrain cost maps (elevation, slope, water, biomes)
-- Automatic cost-map and path statistics (difficulty, elevation gain/loss, total cost)
-- Image and mesh exports for further analysis (`.png`, `.vtk`)
-- Comprehensive automated tests (80 tests) for all pipeline stages
+```text
+Text Prompt / Seed
+      |
+      v
+Prompt Parsing + Parameterization
+      |
+      v
+Procedural Terrain (Macro + Micro Noise)
+      |
+      v
+Erosion (Hydraulic + Thermal)
+      |
+      +--------------------------+
+      |                          |
+      v                          v
+Terrain Analysis + Biomes    DEM Statistics Calibration (optional)
+      |                          |
+      v                          |
+Texture Mapping / Remaster  <----+
+      |
+      v
+3D Rendering + Exports
+      |
+      v
+Cost Map + A* Mission Planning
+```
 
----
+### Main Modules and Components
+- Core generation
+  - `pipeline/procedural_noise_utils.py`: orchestrates terrain generation
+  - `pipeline/macro_terrain.py`: macro structure and domain warp field generation
+  - `pipeline/erosion.py`: hydraulic and thermal erosion
+- Prompt and parameter layer
+  - `pipeline/prompt_parser.py`: keyword-to-parameter parsing
+  - `pipeline/prompt_parameters.py`: deterministic prompt-to-parameter conversion
+- Analysis and calibration
+  - `pipeline/terrain_analysis.py`: slope/curvature/aspect/water-distance + biome masks
+  - `pipeline/dem_analysis.py`: DEM loading, statistics, comparison, and iterative calibration
+- Planning and simulation
+  - `pipeline/cost_map.py`: terrain-to-traversal cost mapping
+  - `pipeline/planner.py`: A* pathfinding, overlays, and path statistics
+  - `pipeline/mission_simulator.py`: interactive mission simulation helpers
+- Rendering and visualization
+  - `pipeline/advanced_terrain_renderer.py`: static and interactive 3D rendering
+  - `pipeline/terrain_texture_mapper.py`: physically inspired color/material mapping
+  - `pipeline/mesh_visualize.py`, `pipeline/matplotlib_viewer.py`: additional visualization utilities
+- Optional AI components
+  - `pipeline/remaster_sd_controlnet.py`: SD + ControlNet remaster pipeline
+  - `pipeline/ai_heightmap_generator.py`, `pipeline/models_awcgan.py`, `pipeline/clip_encoder.py`: AI-assisted generation paths
+- Service layer
+  - `serve.py`: FastAPI endpoints for asynchronous generation workflows
 
-## Tech Stack
+### Data Flow
+1. Prompt and seed are parsed into deterministic terrain parameters.
+2. Procedural generation creates a normalized heightmap (macro shape + micro detail).
+3. Erosion modifies the terrain to improve physical plausibility.
+4. Terrain analysis computes attributes and biome masks.
+5. Optional DEM calibration adjusts procedural parameters to match target DEM statistics.
+6. Texture generation (and optional remaster) creates render-ready surface appearance.
+7. Renderer produces static/interactive 3D outputs and mesh artifacts.
+8. Cost map and A* planner produce mission routes and traversal metrics.
 
-- Python 3.11
-- Deep learning / generation: PyTorch, TensorFlow, Hugging Face Transformers, Diffusers
-- Geometry & visualization: NumPy, PyVista, VTK, Matplotlib
-- Utilities & tooling: OpenCV, SciPy, Pillow, pytest/pytest-cov
+### Interaction Between Generation, Calibration, and Mission Planning
+- Generation provides the base heightfield.
+- Calibration refines generation parameters to better match real DEM characteristics while preserving procedural diversity.
+- Mission planning consumes the generated/calibrated terrain via cost maps to evaluate route feasibility and path efficiency.
 
----
+## 5. Repository Structure
+```text
+.
+|-- pipeline/                     # Core modules (generation, analysis, planning, rendering)
+|   |-- procedural_noise_utils.py
+|   |-- macro_terrain.py
+|   |-- erosion.py
+|   |-- terrain_analysis.py
+|   |-- dem_analysis.py
+|   |-- cost_map.py
+|   |-- planner.py
+|   |-- mission_simulator.py
+|   |-- advanced_terrain_renderer.py
+|   |-- terrain_texture_mapper.py
+|   `-- ...
+|-- tests/                        # Unit tests for core pipeline modules
+|-- data/                         # Input DEM files and synthetic references
+|-- Output/                       # Generated terrain, renders, calibration, and debug artifacts
+|-- pipeline_demo.py              # Main end-to-end demo workflow
+|-- generate_calibrated_terrain.py# DEM-calibrated terrain generation script
+|-- dem_calibration_demo.py       # Standalone calibration demonstration
+|-- biome_visualization_demo.py   # Terrain-analysis and biome visualization demo
+|-- interactive_terrain_viewer.py # Interactive viewer for generated sessions
+|-- serve.py                      # FastAPI service interface
+|-- requirements.txt              # Full dependency set
+`-- requirements_stable.txt       # Pinned/stable dependency set
+```
 
-## Getting Started
+## 6. Technologies Used
+- Language
+  - Python 3.10+
+- Numerical and scientific computing
+  - NumPy, SciPy, pandas
+- Visualization and rendering
+  - Matplotlib, PyVista, VTK, Pillow, OpenCV
+- Terrain and image processing
+  - noise (Perlin/fBM), scikit-image, imageio
+- AI/ML stack (optional paths)
+  - PyTorch, torchvision, Transformers, Diffusers, Accelerate, TensorFlow
+- Service and API
+  - FastAPI, Uvicorn, Pydantic
+- Testing and quality
+  - pytest, pytest-cov
 
-### Installation
+## 7. How It Works
+### 1) Terrain generation
+- Prompt parsing maps textual cues to procedural parameters.
+- Macro terrain stage creates continental-scale structure and warp fields.
+- Micro detail is added with fBM and feature mixing (mountain/valley/river terms).
 
+### 2) DEM loading
+- DEM files are loaded from TIFF/PNG/JPG/NPY/NPZ formats.
+- Input data is normalized and metadata is retained when available.
+
+### 3) Terrain calibration
+- Terrain statistics are computed for both generated terrain and reference DEM.
+- A bounded iterative heuristic adjusts selected procedural parameters.
+- Calibration improves distribution-level similarity without copying DEM geometry.
+
+### 4) Statistical comparison
+- Elevation/slope distributions and scalar terrain metrics are compared.
+- Metrics include roughness, drainage density, ridge spacing, and aggregate error.
+
+### 5) Mission planning simulation
+- A traversal cost grid is computed from terrain characteristics.
+- A* pathfinding finds route candidates between start and goal.
+- Output includes overlays and mission-relevant statistics (cost, elevation gain/loss, path efficiency).
+
+## 8. Installation
+### Prerequisites
+- Python 3.10 or newer
+- Windows/Linux/macOS
+- Optional CUDA-capable GPU for AI/remaster acceleration
+
+### Setup
 ```bash
-# Clone the repository
-
+# 1) Clone and enter repository
 cd "Terrain Sim and Mission"
 
-# Create virtual environment
+# 2) Create virtual environment
 python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/Mac
 
-# Install dependencies
+# 3) Activate environment
+# Windows
+.venv\Scripts\activate
+# Linux/macOS
+# source .venv/bin/activate
+
+# 4) Install dependencies (recommended stable set)
 pip install -r requirements_stable.txt
+
+# Optional: full dependency profile
+# pip install -r requirements.txt
 ```
 
-### Basic Usage
-
+### Verify installation
 ```bash
-# Generate terrain with interactive 3D viewer
-python pipeline_demo.py --prompt "snowy mountain peaks" --interactive-3d
-
-# Generate terrain and compute an optimal mission path
-python pipeline_demo.py --prompt "desert dunes" --simulate-path
-
-# Visualize biome classification
-python biome_visualization_demo.py
-
-# Calibrate to real-world DEM statistics
-python dem_calibration_demo.py --dem path/to/real_dem.tif
-
-# Faster run without image remastering
-python pipeline_demo.py --prompt "rolling hills" --no-remaster
+python -m pytest tests -v
 ```
 
----
-
-## Architecture Overview
-
-High-level flow from text prompt to mission plan:
-Pipeline │ --> │ Biome Analysis│
-│ "mountains"  │     │ Macro + Erosion  │     │ 7 Biome Masks │
-└──────────────┘     └──────────────────┘     └───────────────┘
-                              │                        │
-                              ↓                        ↓
-                     ┌──────────────────┐     ┌───────────────┐
-                     │ 3D Mesh          │     │ Cost Map      │
-                     │ (PyVista)        │     │ (Multi-factor)│
-                     └──────────────────┘     └───────────────┘
-                              │                        │
-                              ↓                        ↓
-                     ┌──────────────────┐     ┌───────────────┐
-                     │ Interactive      │     │ A* Pathfinder │
-                     │ Viewer (GPU)     │     │ (Optimal Path)
-                     ┌──────────────────┐              ↓
-                     │ Interactive      │     ┌───────────────┐
-                     │ Viewer (GPU)     │     │ Path Overlay  │
-                     └──────────────────┘     └───────────────┘
-```
-
-Component breakdown:
-
-- Text Prompt
-  - Free-form user description of the terrain (for example, "snowy mountain peaks" or "sandy desert dunes").
-  - Parsed by the prompt parser in [pipeline/prompt_parser.py](pipeline/prompt_parser.py) into noise and style parameters.
-
-- Terrain Pipeline (Macro + Erosion)
-  - **Phase 1**: Macro-scale heightfield with continental plates and domain warping ([pipeline/macro_terrain.py](pipeline/macro_terrain.py))
-  - **Phase 2**: Hydraulic and thermal erosion for realistic weathering ([pipeline/erosion.py](pipeline/erosion.py))
-  - **Core**: Multi-octave Perlin-based fractional Brownian motion ([pipeline/procedural_noise_utils.py](pipeline/procedural_noise_utils.py))
-  
-- Biome Analysis
-  - **Phase 3**: Computes terrain attributes (slope, curvature, aspect, distance-to-water)
-  - Generates smooth biome masks for snow, rock, scree, grassland, forest, wetlands, and water
-  - Implemented in [pipeline/terrain_analysis.py](pipeline/terrain_analysis.py)
-
-- DEM Calibration
-  - **Phase 4**: Loads real-world DEMs (GeoTIFF, PNG, NPY) and computes terrain statistics
-  - Calibrates procedural parameters to match DEM elevation, slope, drainage, and ridge spacing
-  - Non-destructive and optional (procedural generation works independently)
-  - Implemented in [pipeline/dem_analysis.py](pipeline/dem_analysis.py)
-
-- Cost Map (Multi-factor)
-  - Converts the heightmap into a traversal cost grid by combining elevation, slope, water, and biome-specific modifiers
-  - Implemented in [pipeline/cost_map.py](pipeline/cost_map.py)
-
-- 3D Mesh (PyVista)
-  - Lifts the heightmap into 3D, applies realistic terrain colouring, and builds a renderable mesh.
-  - Implemented in [pipeline/advanced_terrain_renderer.py](pipeline/advanced_terrain_renderer.py) and [pipeline/mesh_visualize.py](pipeline/mesh_visualize.py).
-
-- A* Pathfinder (Optimal Path)
-  - Runs A* search over the cost map to find an efficient route between start and goal positions.
-  - Computes path statistics such as length, elevation gain/loss, and total cost.
-  - Implemented in [pipeline/planner.py](pipeline/planner.py).
-
-- Interactive Viewer (GPU) and Path Overlay
-  - Renders the 3D mesh with optional mission path overlay using a GPU-accelerated PyVista window.
-  - Provides real-time interaction (orbit, zoom, pan) and static image exports.
-  - Implemented in [pipeline/advanced_terrain_renderer.py](pipeline/advanced_terrain_renderer.py) with a Matplotlib fallback in [pipeline/matplotlib_viewer.py](pipeline/matplotlib_viewer.py).
-
----
-
-## Output Artefacts
-     # 2D elevation map
-    ├── enhanced_terrain.png               # Colorized terrain (if remastered)
-    ├── mesh.vtk                           # 3D mesh (VTK format)
-    ├── visualization_3d.png               # Static 3D render
-    ├── visualization_3d_PHOTOREALISTIC.png
-    ├── cost_map.png                       # Traversal cost visualization
-    ├── mission_path_overlay.png           # Optimal path on terrain
-    ├── metadata.json                      # Generation parameters and settings
-    └── debug/                             # Debug outputs (when enabled)
-        ├── macro_heightfield.png          # Phase 1: Macro terrain structure
-        ├── domain_warp_magnitude.png      # Phase 1: Domain warping
-        ├── erosion_water.png              # Phase 2: Water accumulation
-        ├── erosion_sediment.png           # Phase 2: Sediment distribution
-        ├── erosion_delta.png              # Phase 2: Erosion/deposition
-        ├── terrain_attributes.png         # Phase 3: Slope, curvature, etc.
-        ├── biome_masks.png                # Phase 3: Individual biome masks
-        └── dominant_biome.png             # Phase 3: Biome classification
-# Run all tests (80 tests total)
-python -m pytest tests/ -v
-
-# Run specific modules
-python -m pytest tests/test_prompt_parameters.py -v
-python -m pytest tests/test_cost_map.py -v
-python -m pytest tests/test_planner.py -v
-python -m pytest tests/test_erosion.py -v
-python -m pytest tests/test_terrain_analysis.py -v
-python -m pytest tests/test_dem_analysis.py -v
-
-# With coverage
-python -m pytest tests/ --cov=pipeline --cov-report=html
-```
-
-Tests cover all pipeline stages: prompt parsing, macro terrain, erosion stability, biome classification, DEM calibration, cost-map behaviour, and pathfinding.
-
+## 9. Usage
+### End-to-end pipeline demo
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run specific modules
-python -m pytest tests/test_prompt_parameters.py -v
-python -m pytest tests/test_cost_map.py -v
-python -m pytest tests/test_planner.py -v
-
-# With coverage
-python -m pytest tests/ --cov=pipeline --cov-report=html
+python pipeline_demo.py --prompt "rugged alpine terrain with valleys" --interactive-3d
 ```
 
-Tests cover prompt parsing, terrain generation, cost-map behaviour, and pathfinding edge cases.
+### Mission planning mode
+```bash
+python pipeline_demo.py --prompt "semi-arid canyon" --simulate-path
+```
 
----
+### DEM calibration demo
+```bash
+# Synthetic reference DEM
+python dem_calibration_demo.py --iterations 5
 
-## Acknowledgements
+# Real DEM file
+python dem_calibration_demo.py --dem data/dem_files/your_dem.tif --iterations 8
+```
 
-This project builds on the open-source ecosystems around PyVista, VTK, NumPy, Matplotlib, and the `noise` library for procedural generation.
+### Generate terrain with calibrated parameters
+```bash
+python generate_calibrated_terrain.py --seed 42 --size 512 --interactive-3d
+```
+
+### Optional top-texture remaster
+```bash
+python generate_calibrated_terrain.py --seed 42 --size 320 --interactive-3d --remaster-top
+```
+
+### Run API server
+```bash
+python serve.py
+```
+
+## 10. Example Outputs
+Typical outputs are written under `Output/` and may include:
+- Heightmaps (`heightmap.npy`, `heightmap.png`)
+- 3D renders (`terrain_3d_render.png`, interactive session artifacts)
+- Mesh files (`mesh.vtk` and other export formats)
+- Calibration plots and reports (before/after comparisons, metric charts)
+- Biome and terrain-attribute visualizations
+- Cost maps and mission path overlays
+- Metadata files (`metadata.json`) describing parameters and run settings
+
+## 11. Contribution Guidelines
+Contributions are welcome for research and engineering improvements.
+
+1. Fork the repository and create a feature branch.
+2. Keep changes focused and include tests for behavior changes.
+3. Follow existing coding style and module boundaries.
+4. Run the test suite before opening a pull request.
+5. Document new flags, modules, and outputs in this README.
+
+Suggested workflow:
+```bash
+git checkout -b feature/your-feature-name
+python -m pytest tests -v
+```
+
+## 12. License
+License information to be added.
+
+## 13. Author(s)
+- Project Author: [Pratham Dabhane](https://github.com/Pratham-Dabhane), [Sanskruti Sugandhi](https://github.com/sanskruti048), [Vedang Chikane](https://github.com/vedangchikane04), [Sahil Saste](https://github.com/Sahil-Saste)
